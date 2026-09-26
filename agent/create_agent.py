@@ -5,8 +5,10 @@
   python -m agent.create_agent [--use-skill] [--skip-connector]
 
 By default the runbook (skills/incident-runbook/SKILL.md) is inlined into the instructions.
---use-skill  attach the git-backed skill instead; first import it under Settings -> Skills ->
-             Import from GitHub (TrueForge rejects unknown skills).
+--use-skill   attach the git-backed runbook skill instead; first import it under Settings -> Skills ->
+              Import from GitHub (TrueForge rejects unknown skills).
+--book-skill  register + attach the "inference-engineering" skill (distilled from the Inference
+              Engineering book) straight from this public repo (SKILLS_REPO, SKILLS_REF).
 """
 from __future__ import annotations
 
@@ -24,7 +26,18 @@ MCP_NAME = "inference-ops"
 GATED = ["apply_production_config", "rollback_production"]
 
 
-def build_spec(model: str, inline_runbook: bool) -> dict:
+SKILLS_REPO = os.environ.get("SKILLS_REPO", "https://github.com/harshaankad/Inference-Reliability-Engineer")
+SKILLS_REF = os.environ.get("SKILLS_REF", "main")
+
+
+def register_git_skill(client: TrueForge, name: str, description: str) -> None:
+    client.settings.skills.create_or_update(manifest={
+        "type": "git", "name": name, "description": description,
+        "url": SKILLS_REPO, "ref": SKILLS_REF, "path": f"skills/{name}"})
+    print(f"skill '{name}' <- {SKILLS_REPO}@{SKILLS_REF}:skills/{name}")
+
+
+def build_spec(model: str, inline_runbook: bool, book_skill: bool = False) -> dict:
     instructions = (ROOT / "agent" / "instructions.md").read_text()
     if inline_runbook:
         runbook = (ROOT / "skills" / "incident-runbook" / "SKILL.md").read_text().split("---", 2)[-1]
@@ -50,8 +63,11 @@ def build_spec(model: str, inline_runbook: bool) -> dict:
     effort = os.environ.get("AGENT_REASONING_EFFORT")  # only for models that support it, e.g. "medium"
     if effort:
         spec["model"]["params"] = {"reasoning_effort": effort}
-    if not inline_runbook:
-        spec["skills"] = [{"name": "incident-runbook"}]
+    skills = [] if inline_runbook else [{"name": "incident-runbook"}]
+    if book_skill:
+        skills.append({"name": "inference-engineering"})
+    if skills:
+        spec["skills"] = skills
     return spec
 
 
@@ -65,6 +81,7 @@ def main() -> None:
 def _main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--use-skill", action="store_true")
+    ap.add_argument("--book-skill", action="store_true")
     ap.add_argument("--skip-connector", action="store_true")
     args = ap.parse_args()
 
@@ -84,7 +101,11 @@ def _main() -> None:
         })
         print(f"connector '{MCP_NAME}' -> {url}")
 
-    spec = build_spec(model, inline_runbook=not args.use_skill)
+    if args.book_skill:
+        register_git_skill(client, "inference-engineering",
+                           "Inference-engineering mental models, decision rules and anti-patterns for LLM serving "
+                           "(distilled from the Inference Engineering book by Philip Kiely, Baseten).")
+    spec = build_spec(model, inline_runbook=not args.use_skill, book_skill=args.book_skill)
     existing = [a for a in client.agents.list(agent_name=AGENT_NAME) if a.name == AGENT_NAME]
     description = "Diagnoses degraded vLLM inference, proves a fix on a shadow GPU, asks before touching prod."
     if existing:

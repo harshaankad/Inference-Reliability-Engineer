@@ -12,3 +12,4 @@ data/
 infra/aws/instances.env
 *.tgz
 infra/lightning/studio.env
+inference-engineering-book/
