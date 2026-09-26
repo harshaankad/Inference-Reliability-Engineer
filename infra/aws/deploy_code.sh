@@ -19,7 +19,7 @@ if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
     BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 fi
 TGZ=$(mktemp -t ff-code).tgz
-tar czf "$TGZ" --exclude .venv --exclude state --exclude data --exclude .git --exclude __pycache__ \
+COPYFILE_DISABLE=1 tar czf "$TGZ" --exclude '._*' --exclude .venv --exclude state --exclude data --exclude .git --exclude __pycache__ \
   --exclude 'infra/aws/instances.env' --exclude '*.sqlite' --exclude '.env' .
 aws s3 cp "$TGZ" "s3://$BUCKET/code.tgz" --quiet
 URL=$(aws s3 presign "s3://$BUCKET/code.tgz" --expires-in 3600)
@@ -27,7 +27,7 @@ URL=$(aws s3 presign "s3://$BUCKET/code.tgz" --expires-in 3600)
 run() {  # instance-id setup-command
   aws ssm send-command --instance-ids "$1" --document-name AWS-RunShellScript --timeout-seconds 600 \
     --comment "firefighter setup" \
-    --parameters "{\"executionTimeout\":[\"5400\"],\"commands\":[\"set -e\",\"mkdir -p /opt/firefighter && cd /opt/firefighter\",\"curl -sfL '$URL' | tar xz\",\"$2 > /var/log/firefighter-setup.log 2>&1\"]}" \
+    --parameters "{\"executionTimeout\":[\"5400\"],\"commands\":[\"set -e\",\"mkdir -p /opt/firefighter && cd /opt/firefighter\",\"curl -sfL '$URL' | tar xz\",\"find /opt/firefighter -name '._*' -delete\",\"$2 > /var/log/firefighter-setup.log 2>&1\"]}" \
     --query Command.CommandId --output text
 }
 
