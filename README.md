@@ -8,7 +8,7 @@ Built on [TrueForge](https://trueforge.dev) for the *Agents That Act* hackathon 
 
 A team serves **Qwen2.5-7B-Instruct with vLLM on an NVIDIA L4** (Lightning AI Studio on GCP). The config is legal, reviewed, and healthy for weeks of short chat traffic. Then product starts sending long RAG contexts. p95 latency explodes, goodput collapses, and the KV cache fills up. **The config didn't change. The model didn't change. There is no error message.**
 
-The physics: 7B weights take ~15 GB of the 24 GB GPU. What's left for the KV cache holds only tens of thousands of tokens. With 5–11k-token prompts and `max_num_seqs: 256`, vLLM admits far more sequences than the cache can hold, preempts and recomputes them, and the queue grows. Prefix caching is off, so every long request re-prefills the same shared system prompt.
+The physics: 7B weights take ~15 GB of the 24 GB GPU. What's left for the KV cache holds only tens of thousands of tokens. With 5–11k-token prompts and `max_num_seqs: 256`, vLLM admits far more sequences than the cache can hold; the cache fills, requests wait for KV capacity (older vLLM versions preempt and recompute instead), and the queue grows. Prefix caching is off, so every long request re-prefills the same shared system prompt.
 
 The agent has to measure its way to that diagnosis and to a fix: fewer concurrent sequences, prefix caching, maybe FP8 KV cache (quality-gated). It works by running real experiments on a real GPU, not by recalling defaults.
 
@@ -17,7 +17,7 @@ The agent has to measure its way to that diagnosis and to a fix: fewer concurren
 | Requirement | How |
 |---|---|
 | Runs on TrueForge | Agent `inference-firefighter`: OpenAI model + `inference-ops` MCP server + runbook + sandbox + approvals + subagents + Generative UI |
-| Reaches a real system | Real vLLM on real AWS GPUs, real Prometheus metrics, real container logs, real `nvidia-smi`, real deploys |
+| Reaches a real system | Real vLLM on real NVIDIA L4 GPUs (Lightning AI on GCP; the AWS `g6` path is also supported), real Prometheus metrics, real engine logs, real `nvidia-smi`, real deploys |
 | Generated code runs in a sandbox | The agent's analysis code (percentiles by prompt length, before/after comparisons, charts) runs in a **Daytona** sandbox via Code Mode. The sandbox has no credentials and no route to the fleet. |
 | Stops before irreversible actions | `apply_production_config` / `rollback_production` restart the live server. They are gated by TrueForge approval **and** refused server-side unless a shadow experiment of that exact config passed every SLO on recent production traffic. |
 
