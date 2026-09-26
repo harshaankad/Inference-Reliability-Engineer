@@ -46,6 +46,26 @@ The GPU nodes run on **Lightning AI** because the AWS GPU quota was still under 
 also deploys GPU nodes on AWS (`g6.xlarge`, see "Deploy on AWS" below); the control node accepts either
 AWS private IPs or controller URLs.
 
+## A real run, in pictures
+
+Recorded on 2026-09-26 on the real fleet: Qwen2.5-7B-Instruct on vLLM 0.30, one NVIDIA L4 per node (Lightning AI, GCP), same request rate throughout (0.6 req/s). All numbers come from Prometheus and the agent's own shadow experiments.
+
+| # | What you see | Image |
+|---|---|---|
+| 1 | **Healthy baseline.** Short chat traffic: p95 TTFT < 5 s, end-to-end ~20 s (well under the 40 s SLO), 80–110 output tokens/s, KV cache mostly < 10%, nothing waiting. Prefix caching is off in the live config | [01](docs/screenshots/01-baseline-healthy.png) |
+| 2 | **Chaos: product starts sending long RAG contexts.** Same request rate, prompt length jumps to 12–15K tokens, KV cache spikes to 100%, requests wait for KV capacity, p95 end-to-end climbs past 60 s | [02](docs/screenshots/02-chaos-incident.png) |
+| 3 | **The agent triages** in TrueForge: SLOs, policy, change history (no config change), then computes the before/after classification in code in the Daytona sandbox | [03a](docs/screenshots/03a-agent-triage-start.png) |
+| 4 | **Hypothesis → measurement → verdict.** Prefix caching alone: "REJECTED as a standalone fix, but directionally positive" (TTFT 17.2 → 11.3 s). FP8 KV alone: "REJECTED… more capacity admitted more concurrent work" | [03](docs/screenshots/03-agent-investigating.png) |
+| 5 | **Every experiment on the shadow GPU**, one burst each (KV cache, waiting for KV, prompt length, latency), never touching prod | [03b](docs/screenshots/03b-shadow-experiments.png) |
+| 6 | **It refuses to guess.** After six single-lever experiments, none passed every SLO, so it withheld the change: "No safe production change proven… Production was not restarted" | [04](docs/screenshots/04-agent-evidence-no-safe-change.png) |
+| 7 | **The on-call engineer extends the budget; the agent consults the Inference Engineering skill** and tests combinations: prefix caching + `max_num_seqs` 16 + `gpu_memory_utilization` 0.95 passes every SLO (TTFT 4.76 s, e2e 33 s, goodput 100%, KV peak 35%). It checks 1.3× headroom and rejects 24 sequences, citing the batching trade-off. Then it **stops and asks**: diff, evidence run, blast radius, Allow / Deny | [05](docs/screenshots/05-approval-request.png) |
+| 8 | **Human approves → prod v3.** Healthy in 107.5 s, no rollback; the agent verifies on a clean 3-minute post-restart window: all SLOs pass with ~50% long prompts, KV peak 30%, queue 0, prefix-cache hit rate 30% | [06](docs/screenshots/06-agent-remediation-complete.png), [06a](docs/screenshots/06a-agent-before-after.png) |
+| 9 | **The whole timeline in Grafana**: baseline → chaos → experiments → approved fix, with the live config showing prefix caching True, memory 0.95, KV concurrency 1.58× → 2.48× | [07](docs/screenshots/07-full-timeline-prod.png), [07b](docs/screenshots/07b-full-timeline-prod-and-shadow.png) |
+| 10 | **One-image summary** (Prometheus): after the fix, p95 TTFT settles around 4–5 s (one brief ~9 s blip), end-to-end around 25–30 s, KV mostly < 30%, and requests waiting for KV stay at zero, under the same long-context traffic that caused the incident | [08](docs/screenshots/08-summary-baseline-chaos-fix.png) |
+| 11 | **TrueForge Sessions**: 3 turns, 37 min, 63 tool calls, 0 errors, with the approval (human-in-the-loop) step on the timeline | [09](docs/screenshots/09-trueforge-session-timeline.png) |
+
+![Summary: baseline, chaos, agent fix](docs/screenshots/08-summary-baseline-chaos-fix.png)
+
 ### MCP tools (`inference-ops`)
 | Class | Tools |
 |---|---|

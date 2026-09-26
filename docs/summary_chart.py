@@ -75,11 +75,11 @@ def main() -> None:
         ax.grid(alpha=0.2)
         if slo or isinstance(expr, list):
             ax.legend(loc="upper left", fontsize=9)
-    for lbl, t in phases:
-        axes[0].annotate(lbl, xy=(t, 1.02), xycoords=("data", "axes fraction"), fontsize=9, rotation=0,
-                         ha="left", va="bottom", color="#dddddd")
+    for i, (lbl, t) in enumerate(phases):
+        axes[0].annotate(lbl, xy=(t, 1.02 + 0.13 * (i % 2)), xycoords=("data", "axes fraction"), fontsize=9,
+                         ha="left", va="bottom", color="#dddddd", annotation_clip=False)
     axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M UTC"))
-    fig.tight_layout(rect=(0, 0, 1, 0.985))
+    fig.tight_layout(rect=(0, 0, 1, 0.975))
     fig.savefig(a.out, dpi=130)
     print(a.out)
 
