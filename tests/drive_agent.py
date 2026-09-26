@@ -40,6 +40,8 @@ def run_turn(client: TrueForge, session_id: str, items: list[dict[str, Any]]) ->
     names: dict[str, str] = {}
     t0 = time.time()
     status = "?"
+    turn_start_id = max((e.model_dump()["event"]["id"] for e in client.sessions.list_events(session_id=session_id)),
+                        default="")
     for ev in client.sessions.create_turn_stream(session_id=session_id, input=items):
         et = getattr(ev, "type", "")
         tag = f"[{time.time() - t0:6.1f}s]"
@@ -72,6 +74,25 @@ def run_turn(client: TrueForge, session_id: str, items: list[dict[str, Any]]) ->
         elif et == "turn.done":
             status = getattr(ev.state, "status", "?")
             print(f"{tag} TURN DONE: {status}")
+    # The stream may not carry full model.message events; the session log always does.
+    log = [e.model_dump()["event"] for e in client.sessions.list_events(session_id=session_id)]
+    by_id = {e["id"]: e for e in log}
+    print("---- agent messages and tool calls this turn (from the session log) ----")
+    for e in sorted((e for e in log if e.get("type") == "model.message"), key=lambda e: e["id"]):
+        if e["id"] < turn_start_id:
+            continue
+        if e.get("content"):
+            print(f"AGENT: {short(e['content'], 1500)}")
+        for tc in e.get("tool_calls") or []:
+            print(f"  CALL {tc['function']['name']}({short(tc['function']['arguments'], 400)})")
+    for p in pending:
+        for e in log:
+            if e.get("type") == "tool.approval_required" and any(r["id"] == p["tool_call_id"] for r in e["tool_calls"]):
+                src = by_id.get(next(r["source_event_id"] for r in e["tool_calls"] if r["id"] == p["tool_call_id"]), {})
+                call = next((c for c in src.get("tool_calls") or [] if c["id"] == p["tool_call_id"]), None)
+                if call:
+                    p.update(name=call["function"]["name"], arguments=call["function"]["arguments"])
+        print(f"*** PENDING APPROVAL: {p['name']}\n    args: {short(p['arguments'], 2500)}")
     return {"session_id": session_id, "pending": pending, "status": status}
 
 

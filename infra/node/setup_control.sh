@@ -9,6 +9,8 @@ PROD_IP=${2:-}     # may be empty while GPU nodes are not launched yet; re-run s
 SHADOW_IP=${3:-}
 APP=/opt/firefighter
 cd $APP
+# A real (re)deploy always removes the fake-engine wiring-test stack if it is running.
+[ -f dev/aws_wiring_test.sh ] && [ -f /etc/firefighter/control.env ] && bash dev/aws_wiring_test.sh stop || true
 
 param() { aws ssm get-parameter --region "$REGION" --name "/firefighter/$1" --with-decryption \
   --query Parameter.Value --output text 2>/dev/null || true; }

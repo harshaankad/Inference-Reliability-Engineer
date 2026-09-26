@@ -157,12 +157,17 @@ To test against a local TrueForge, start it with `OUTBOUND_URL_ALLOWED_HOSTS='["
   - Guardrail refusals, the evidence-gated apply, auto-rollback bookkeeping
   - Prometheus scraping through the controllers with bearer auth, and PromQL through the MCP server
   - A real TrueForge server registering the connector (it sees all 20 tools and their annotations) and creating the agent with the approval gates
-- **Still to verify on AWS:**
+- **Verified on AWS** (TrueForge on the control node, `openai/gpt-5-5`, Daytona; stand-in engine via `dev/aws_wiring_test.sh`):
+  - **Code Mode bridge:** the agent's Python script in the Daytona sandbox called `get_request_log` through `call_tool` and computed p95 TTFT by prompt length
+  - shadow deploy → load test → evidence → `plan_production_change` (`ready: true`)
+  - **approval pause** on `apply_production_config`, with diff, evidence, justification and blast radius in the request
+  - **Deny with a reason:** the agent stopped, did not retry, and production was untouched
+- **Still to verify on the real GPUs** (waiting on the g6 quota):
   - vLLM flags on the pinned image
   - Real KV-cache exhaustion under `long_context_shift` (calibration)
   - FP8 KV cache quality on L4
-  - TrueForge Code Mode reaching the MCP server from Daytona
-  - The approval pause with the OpenAI model
+
+`tests/drive_agent.py` runs the agent from a terminal through the TrueForge SDK (rehearsals, wiring tests). It prints every step and stops at approval pauses, so a human decides with `--allow` or `--deny "reason"`.
 
 ## Repo layout
 

@@ -15,9 +15,9 @@
 | Code: MCP server, node controller, load generator, replay harness, dataset, chaos tooling | ✅ Built and tested locally |
 | TrueForge integration: connector registration + agent with approval gates | ✅ Tested against a real TrueForge server |
 | Prometheus integration | ✅ Tested with a real Prometheus |
-| AWS scripts: launch, secrets, deploy, tunnel, teardown, node setup | ✅ Written and syntax-checked; ⏳ not yet run on AWS |
+| AWS: control node (TrueForge + MCP server) | ✅ Running in ap-south-1; GPU nodes ⏳ waiting on the g6 quota (AWS support case) |
 | Real-GPU calibration of the incident | ⏳ Needs AWS |
-| End-to-end agent run with OpenAI + Daytona | ⏳ Needs keys |
+| Agent on AWS TrueForge (OpenAI + Daytona) | ✅ Wiring verified end to end: Code Mode bridge, shadow tools, approval pause, deny path (stand-in engine) |
 | Demo video, final README polish | ⏳ |
 | Repo | ✅ Public: https://github.com/harshaankad/Inference-Reliability-Engineer |
 
@@ -107,8 +107,9 @@
 ## 5. What's left (in order)
 
 ### Phase A: AWS bring-up (as soon as organizer credentials arrive)
-- [ ] Check the quota: *Running On-Demand G and VT instances* in ap-south-1 ≥ 8 vCPUs.
-- [ ] `AWS_REGION=ap-south-1 ./infra/aws/launch.sh`
+- [x] Check the quota: it was 0 in every region. An increase to 8 vCPUs was requested in ap-south-1 and is under AWS review (support case).
+- [x] Control node launched (`SKIP_GPU=1 ./infra/aws/launch.sh`), secrets stored, control setup done; OpenAI + Daytona configured in the AWS TrueForge; agent registered with `openai/gpt-5-5`.
+- [ ] When the quota is approved: `AWS_REGION=ap-south-1 ./infra/aws/launch.sh` (adds the GPU nodes), then `./infra/aws/deploy_code.sh` (the control setup removes the wiring-test stack automatically)
 - [ ] `HF_TOKEN=… ./infra/aws/secrets.sh` (+ `PROMETHEUS_URL` if we use our existing Prometheus, and add the jobs from `infra/prometheus/prometheus.yml.tmpl` to it; it must be able to reach the nodes on :9000)
 - [ ] `./infra/aws/deploy_code.sh`, then watch `/var/log/firefighter-setup.log` on each node until `SETUP COMPLETE`.
 - [ ] If vLLM fails to start: check `docker logs vllm-prod`; pin `VLLM_IMAGE` to a known-good tag; lower `gpu_memory_utilization` only if startup OOMs.
@@ -124,8 +125,9 @@
 - [ ] Write the final SLO thresholds into `mcp_server/policy.yaml`; pin `VLLM_IMAGE`; commit the calibration numbers to the README.
 
 ### Phase C: Agent behavior
-- [ ] Verify the **Code Mode bridge**: the agent's sandbox script calls `call_tool("inference-ops", …)`. Fallback: direct tool calls, with large results auto-offloaded to sandbox files.
-- [ ] Verify the **approval pause** appears for `apply_production_config`, and that **Deny with a reason** makes the agent adapt.
+- [x] Verify the **Code Mode bridge**: verified; the agent's Daytona script called `call_tool("inference-ops", "get_request_log", …)`.
+- [x] Verify the **approval pause** for `apply_production_config` and **Deny with a reason**: verified; the agent stopped and did not retry.
+- [ ] Deny → **adapt** → re-prove → ask again (needs a real incident run).
 - [ ] Run the full incident ≥ 3 times (`chaos reset --clear-evidence …` between runs). Review each run in **Sessions**. Fix failures in the runbook, instructions or tool descriptions, never by hard-coding answers.
 - [ ] Check classification on `burst` (expect "no change") and `surge` (expect "capacity, not config": no scale-out tool exists, so the agent should say so).
 

@@ -1,0 +1,21 @@
+# FAKE-ENGINE POLICY: only for dev/aws_wiring_test.sh rehearsals. The toy engine's latencies are
+# much smaller than a real L4's, so thresholds are scaled down to make the stand-in incident visible.
+# Never use for the real fleet (the real policy is mcp_server/policy.yaml).
+slos:
+  p95_ttft_ms:   {max: 300}
+  p95_e2e_ms:    {max: 2000}
+  error_rate:    {max: 0.01}
+  goodput_ratio: {min: 0.95}
+quality:
+  min_accuracy: 0.95
+  max_drop_vs_baseline: 0.025
+evidence:
+  max_age_minutes: 90
+  min_duration_s: 45
+  min_rate_multiplier: 1.0
+analysis:
+  long_prompt_threshold_tokens: 2000
+constraints:
+  - STAND-IN ENGINE (wiring test). Numbers are not real.
+  - The served model is fixed; only serving knobs may change.
+  - Production changes restart the live server and require human approval.

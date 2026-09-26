@@ -36,6 +36,7 @@ PROD_CONTROLLER_URL=http://127.0.0.1:9100
 SHADOW_CONTROLLER_URL=http://127.0.0.1:9101
 MCP_STATE_DIR=$FAKE/mcp
 PROMETHEUS_URL=
+POLICY_PATH=$APP/dev/fake_policy.yaml
 EOF
   printf '[Service]\nEnvironmentFile=/etc/firefighter/fake.env\n' > /etc/systemd/system/ff-mcp.service.d/fake.conf
   systemctl daemon-reload && systemctl restart ff-mcp
@@ -56,4 +57,9 @@ status() {
   ls /etc/systemd/system/ff-mcp.service.d/ 2>/dev/null || echo "no MCP drop-in (real config)"
 }
 
-"${1:-status}"
+traffic() {  # switch the FAKE prod traffic scenario
+  PROD_CONTROLLER_URL=http://127.0.0.1:9100 .venv/bin/python -m chaos.chaos traffic "$1"
+}
+
+cmd=${1:-status}; shift || true
+"$cmd" "$@"
