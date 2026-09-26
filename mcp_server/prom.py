@@ -56,4 +56,8 @@ async def engine_samples(start: float, end: float) -> list[dict[str, Any]]:
         for series in await query_range(promql, start, end):
             for t, v in series["values"]:
                 by_t.setdefault(float(t), {"t": float(t)})[key] = float(v)
+    capacity = f'sum(vllm:num_requests_waiting_by_reason{{job="{job}",reason="capacity"}})'
+    for series in await query_range(capacity, start, end):
+        for t, v in series["values"]:
+            by_t.setdefault(float(t), {"t": float(t)})["waiting_for_kv_capacity"] = float(v)
     return [by_t[t] for t in sorted(by_t)]

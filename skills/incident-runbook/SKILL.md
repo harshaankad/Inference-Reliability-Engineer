@@ -38,21 +38,24 @@ Classify, with evidence for and against:
 |---|---|
 | Regression starts at a deploy; load and mix unchanged | config regression |
 | rps up, same mix, queue up, served throughput flat | load / capacity |
-| Same rps, prompts much longer, TTFT up mostly on long prompts, KV cache ~100%, preemptions up | **traffic-shape shift -> KV-cache pressure** |
+| Same rps, prompts much longer, TTFT up, KV cache ~100%, requests waiting for KV capacity (or preemptions) | **traffic-shape shift -> KV-cache pressure** |
 | Short spike, queue drains by itself, no deploy | transient: recommend **no change** and stop |
 | Several of the above | mixed |
 
 ## 3. Reproduce before fixing
 1. `capture_workload(start=<incident start>)`: real production requests.
 2. `deploy_shadow(changes={}, reason="reproduce prod")`, then `run_load_test(...)`.
-3. It must breach the same SLOs with the same engine signature (KV cache pinned, preemptions). If it
+3. It must breach the same SLOs with the same engine signature (KV cache pinned, waiting for KV capacity
+   or preemptions). If it
    does not reproduce, your classification is wrong: go back to step 2.
 
 ## 4. Experiment (the loop)
 Think physically about GPU memory. Weights (~15 GB for Qwen2.5-7B in bf16) plus the KV cache must fit
 in `gpu_memory_utilization` x 24 GB. The KV cache is what is left: **only enough for tens of thousands
 of tokens**. `get_logs(grep="KV cache|blocks|preempt")` shows the real capacity. Long prompts x many
-concurrent sequences > capacity -> vLLM preempts and recomputes sequences -> queueing -> p95 explodes.
+concurrent sequences > capacity -> queueing -> p95 explodes. Older vLLM preempts and recomputes
+sequences (`preemptions`); newer vLLM (V1 scheduler) mostly holds requests back instead, which shows up as
+`waiting_for_kv_capacity` > 0 (requests waiting because the KV cache is full) with preemptions still 0.
 
 Levers (each has a cost; measure, never assume):
 - `max_num_seqs`: fewer concurrent sequences means less over-admission and fewer preemptions.

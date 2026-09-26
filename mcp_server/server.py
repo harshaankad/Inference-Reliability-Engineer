@@ -166,6 +166,8 @@ async def compare_windows(baseline_start: str, baseline_end: str, incident_start
         "kv_cache_usage_mean": [eng_b.get("kv_cache_usage_mean"), eng_i.get("kv_cache_usage_mean")],
         "waiting_mean": [eng_b.get("waiting_mean"), eng_i.get("waiting_mean")],
         "preemptions": [eng_b.get("preemptions"), eng_i.get("preemptions")],
+        "waiting_for_kv_capacity_mean": [eng_b.get("waiting_for_kv_capacity_mean"),
+                                         eng_i.get("waiting_for_kv_capacity_mean")],
     }
     changes = [{k: h.get(k) for k in ("version", "author", "message", "config_hash", "status")} | {"ts": iso(h["ts"])}
                for h in hist if b0 <= h["ts"] <= i1]
@@ -204,7 +206,8 @@ async def get_engine_metrics(start: str, end: str = "now", max_points: int = 120
 
         hq = rate("prefix_queries_total")
         points.append({"t": iso(b["t"]), "kv_cache_usage": b.get("kv_cache_usage"), "running": b.get("running"),
-                       "waiting": b.get("waiting"), "preemptions_per_s": rate("preemptions_total"),
+                       "waiting": b.get("waiting"), "waiting_for_kv_capacity": b.get("waiting_for_kv_capacity"),
+                       "preemptions_per_s": rate("preemptions_total"),
                        "prefix_hit_rate": round(rate("prefix_hits_total") / hq, 3) if hq else b.get("prefix_hit_rate"),
                        "generation_tokens_per_s": rate("generation_tokens_total"),
                        "prompt_tokens_per_s": rate("prompt_tokens_total")})

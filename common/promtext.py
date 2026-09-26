@@ -43,9 +43,16 @@ def parse(text: str) -> dict[str, float]:
     return totals
 
 
+# Newer vLLM (V1 scheduler) often does not preempt under KV pressure; it holds requests back and
+# labels why. reason="capacity" = waiting because the KV cache is full.
+_WAIT_REASON = re.compile(r'^vllm:num_requests_waiting_by_reason\{[^}]*reason="capacity"[^}]*\}\s+([-+0-9.eE]+)', re.M)
+
+
 def extract(text: str) -> dict[str, float | None]:
     raw = parse(text)
     out: dict[str, float | None] = {}
     for key, names in ALIASES.items():
         out[key] = next((raw[n] for n in names if n in raw), None)
+    cap = [float(v) for v in _WAIT_REASON.findall(text)]
+    out["waiting_for_kv_capacity"] = sum(cap) if cap else None
     return out

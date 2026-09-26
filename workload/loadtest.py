@@ -43,6 +43,7 @@ def engine_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
         return round(v[-1] - v[0], 1) if len(v) >= 2 else None
 
     kv, waiting, running = vals("kv_cache_usage"), vals("waiting"), vals("running")
+    cap = vals("waiting_for_kv_capacity")
     span = max(1.0, samples[-1]["t"] - samples[0]["t"])
     hits, queries = delta("prefix_hits_total"), delta("prefix_queries_total")
     hit_rate = round(hits / queries, 3) if hits is not None and queries else None
@@ -56,6 +57,8 @@ def engine_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "running_mean": round(sum(running) / len(running), 1) if running else None,
         "waiting_mean": round(sum(waiting) / len(waiting), 1) if waiting else None,
         "waiting_max": max(waiting) if waiting else None,
+        "waiting_for_kv_capacity_mean": round(sum(cap) / len(cap), 1) if cap else None,
+        "waiting_for_kv_capacity_max": max(cap) if cap else None,
         "preemptions": delta("preemptions_total"),
         "prefix_cache_hit_rate": hit_rate,
         "engine_generation_tokens_per_s": round(gen / span, 1) if gen is not None else None,

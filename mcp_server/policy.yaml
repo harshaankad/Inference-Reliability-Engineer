@@ -1,10 +1,12 @@
 # SLOs and guardrails the agent must satisfy. Visible to the agent via get_policy().
-# The numbers below are STARTING POINTS: calibrate them from real measurements on the g6.xlarge (L4)
-# (README -> Calibration). Healthy traffic should pass comfortably; the long-context shift should fail.
+# Calibrated on the real fleet (Lightning AI, GCP, 1 x NVIDIA L4 per node, Qwen2.5-7B-Instruct, vLLM 0.30):
+#   healthy  (1 rps, ~5% long prompts):  p95 TTFT 2.5 s, p95 e2e 20.9 s, goodput 99.5%  -> passes
+#   incident (1 rps, ~50% long prompts): p95 TTFT 21.9 s, p95 e2e 163 s,  goodput 4%     -> fails
+# e2e is dominated by answer length (up to 256 tokens at ~15-18 tokens/s per request on an L4).
 
 slos:
-  p95_ttft_ms:   {max: 2000}   # time to first token, all requests
-  p95_e2e_ms:    {max: 6000}   # end-to-end latency, all requests
+  p95_ttft_ms:   {max: 4000}   # time to first token, all requests
+  p95_e2e_ms:    {max: 30000}  # end-to-end latency, all requests
   error_rate:    {max: 0.01}   # errors + timeouts + requests cancelled after drain
   goodput_ratio: {min: 0.95}   # share of offered requests completed within the TTFT and e2e limits
 
