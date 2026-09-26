@@ -55,7 +55,7 @@
 ## 4. What's built (done)
 
 ### 4.1 Components
-- [x] **`mcp_server/`**: `inference-ops` MCP server (MCP SDK v2 `MCPServer`, streamable HTTP, bearer auth). 19 tools:
+- [x] **`mcp_server/`**: `inference-ops` MCP server (MCP SDK v2 `MCPServer`, streamable HTTP, bearer auth). 20 tools:
   - Observe: `get_slo_status`, `compare_windows`, `get_request_log`, `get_engine_metrics`, `query_prometheus`, `get_serving_config`, `get_change_history`, `get_logs`, `get_gpu_status`, `get_policy`, `list_experiments`, `get_experiment`, `plan_production_change`, `wait_for_shadow`
   - Shadow: `capture_workload`, `deploy_shadow`, `run_load_test` (**hypothesis required**), `run_quality_eval`
   - **Gated**: `apply_production_config`, `rollback_production` (`destructiveHint` + named in `require_approval_for_tools`)
@@ -92,7 +92,7 @@
   - gated apply with valid evidence (creates prod v2), then rollback (v3)
   - an FP8 change is blocked until a quality eval exists
 - [x] Real Prometheus 3.15 scraping all targets with bearer auth; engine metrics and PromQL read through the MCP server.
-- [x] Real TrueForge server: the connector registers and TrueForge sees all 19 tools with correct annotations; the agent is created with gates `["apply_production_config", "rollback_production", "@destructive"]`, sandbox, subagents and Generative UI on.
+- [x] Real TrueForge server: the connector registers and TrueForge sees all 20 tools with correct annotations; the agent is created with gates `["apply_production_config", "rollback_production", "@destructive"]`, sandbox, subagents and Generative UI on.
 - [x] All Python compiles under 3.9 (AWS nodes run 3.10); all shell scripts pass `bash -n` under macOS bash 3.2.
 
 ### 4.3 Findings from testing (important on the day)

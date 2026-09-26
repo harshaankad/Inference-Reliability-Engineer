@@ -153,10 +153,10 @@ To test against a local TrueForge, start it with `OUTBOUND_URL_ALLOWED_HOSTS='["
 ## Verified so far vs still to verify on AWS
 
 - **Verified locally:**
-  - MCP server over real streamable HTTP with bearer auth (19 tools, correct read-only/destructive annotations)
+  - MCP server over real streamable HTTP with bearer auth (20 tools, correct read-only/destructive annotations)
   - Guardrail refusals, the evidence-gated apply, auto-rollback bookkeeping
   - Prometheus scraping through the controllers with bearer auth, and PromQL through the MCP server
-  - A real TrueForge server registering the connector (it sees all 19 tools and their annotations) and creating the agent with the approval gates
+  - A real TrueForge server registering the connector (it sees all 20 tools and their annotations) and creating the agent with the approval gates
 - **Still to verify on AWS:**
   - vLLM flags on the pinned image
   - Real KV-cache exhaustion under `long_context_shift` (calibration)
