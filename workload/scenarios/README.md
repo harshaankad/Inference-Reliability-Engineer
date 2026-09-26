@@ -10,4 +10,4 @@ The agent never sees scenario names; it has to infer what changed from the reque
 | `surge.json` | Many more users (3x rps), same mix |
 | `burst.json` | 45 s spike at 5x, then back to normal (correct answer: no production change) |
 
-The numbers are starting points. **Calibrate on the real g5.xlarge** (see README, "Calibration").
+The numbers are starting points. **Calibrate on the real g6.xlarge (L4)** (see README, "Calibration").

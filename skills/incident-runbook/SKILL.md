@@ -58,8 +58,8 @@ Levers (each has a cost; measure, never assume):
 - `max_num_seqs`: fewer concurrent sequences means less over-admission and fewer preemptions.
   Too low starves throughput.
 - `enable_prefix_caching`: long requests share one long system prompt; reuse its KV blocks.
-- `kv_cache_dtype=fp8`: about 2x KV capacity per GB; **must pass `run_quality_eval`** (and support on
-  A10G depends on the vLLM version; a failed start is a valid, informative result).
+- `kv_cache_dtype=fp8`: about 2x KV capacity per GB; **must pass `run_quality_eval`** (supported on
+  the L4; a failed start would still be a valid, informative result).
 - `gpu_memory_utilization`: a little more room for KV cache (max 0.95).
 - `max_num_batched_tokens`: per-step token budget. More is **not** automatically better under KV
   pressure. It can admit more prefill work into a cache that is already full.

@@ -5,8 +5,8 @@
 # yours), TrueForge (npx, systemd ff-trueforge, bound to localhost, reached via SSM tunnel).
 set -euxo pipefail
 REGION=$1
-PROD_IP=$2
-SHADOW_IP=$3
+PROD_IP=${2:-}     # may be empty while GPU nodes are not launched yet; re-run setup once they are
+SHADOW_IP=${3:-}
 APP=/opt/firefighter
 cd $APP
 
@@ -40,7 +40,7 @@ mkdir -p /etc/firefighter state/mcp /etc/prometheus
 
 # ---- Prometheus (skip if you already run one: set /firefighter/prometheus_url and add the
 # ---- jobs from infra/prometheus/prometheus.yml.tmpl to it)
-if [ -z "$PROM_URL" ]; then
+if [ -z "$PROM_URL" ] && [ -n "$PROD_IP" ]; then
   umask 077; printf '%s' "$CONTROLLER_TOKEN" > /etc/prometheus/controller_token; umask 022
   chmod 644 /etc/prometheus/controller_token  # prom container runs as nobody; host is single-purpose
   sed -e "s/__PROD_IP__/$PROD_IP/g; s/__SHADOW_IP__/$SHADOW_IP/g" infra/prometheus/prometheus.yml.tmpl > /etc/prometheus/prometheus.yml
@@ -49,6 +49,8 @@ if [ -z "$PROM_URL" ]; then
     -v /etc/prometheus:/etc/prometheus -v prometheus-data:/prometheus prom/prometheus:latest \
     --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=3d --web.listen-address=127.0.0.1:9090
   PROM_URL=http://127.0.0.1:9090
+elif [ -z "$PROM_URL" ]; then
+  echo "GPU node IPs unknown: skipping Prometheus for now (re-run this script after launching GPU nodes)"
 fi
 
 GITHUB_TOKEN=$(param github_token)
@@ -117,10 +119,12 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now ff-mcp ff-trueforge
+systemctl enable ff-mcp ff-trueforge
+systemctl restart ff-mcp          # pick up a re-rendered control.env on re-runs
+systemctl start ff-trueforge      # not restarted on re-runs: keeps the UI session alive
 sleep 20
 curl -s -o /dev/null -w "mcp without token -> %{http_code} (expect 401)\n" -XPOST "http://$CONTROL_IP:8765/mcp" || true
-curl -sf "http://$PROD_IP:9000/health" && echo " prod controller reachable" || echo "prod controller not up yet (GPU setup may still be running)"
-curl -sf "http://$SHADOW_IP:9000/health" && echo " shadow controller reachable" || echo "shadow controller not up yet"
+[ -n "$PROD_IP" ] && curl -sf "http://$PROD_IP:9000/health" && echo " prod controller reachable" || echo "prod controller not up yet (GPU setup may still be running)"
+[ -n "$SHADOW_IP" ] && curl -sf "http://$SHADOW_IP:9000/health" && echo " shadow controller reachable" || echo "shadow controller not up yet"
 for _ in $(seq 1 30); do curl -sf 127.0.0.1:8790/api/v1/agents >/dev/null && break; sleep 5; done
 echo "SETUP COMPLETE (control). TrueForge on localhost:8790 (tunnel: ./infra/aws/tunnel.sh)"

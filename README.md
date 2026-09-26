@@ -6,7 +6,7 @@ Built on [TrueForge](https://trueforge.dev) for the *Agents That Act* hackathon 
 
 ## The incident
 
-A team serves **Qwen2.5-7B-Instruct with vLLM on an NVIDIA A10G** (AWS `g5.xlarge`, Mumbai). The config is legal, reviewed, and healthy for weeks of short chat traffic. Then product starts sending long RAG contexts. p95 latency explodes, goodput collapses, preemptions climb. **The config didn't change. The model didn't change. There is no error message.**
+A team serves **Qwen2.5-7B-Instruct with vLLM on an NVIDIA L4** (AWS `g6.xlarge`, Mumbai). The config is legal, reviewed, and healthy for weeks of short chat traffic. Then product starts sending long RAG contexts. p95 latency explodes, goodput collapses, preemptions climb. **The config didn't change. The model didn't change. There is no error message.**
 
 The physics: 7B weights take ~15 GB of the 24 GB GPU. What's left for the KV cache holds only tens of thousands of tokens. With 5–11k-token prompts and `max_num_seqs: 256`, vLLM admits far more sequences than the cache can hold, preempts and recomputes them, and the queue grows. Prefix caching is off, so every long request re-prefills the same shared system prompt.
 
@@ -37,7 +37,7 @@ The agent has to measure its way to that diagnosis and to a fix: fewer concurren
                         └─ chaos tooling (operator only)
                                │ VPC-only, bearer token
             ┌──────────────────┴──────────────────┐
-     PROD g5.xlarge (A10G)                SHADOW g5.xlarge (A10G)
+     PROD g6.xlarge (L4)                  SHADOW g6.xlarge (L4)
      controller :9000                     controller :9000
      vLLM (127.0.0.1:8100)                vLLM (127.0.0.1:8100) ← candidate configs
      loadgen = the users + request log    replay harness + quality eval
@@ -71,14 +71,14 @@ Guardrails live in the server regardless of approval:
 
 Keys never go into the repo or the video. The OpenAI and Daytona keys are only ever pasted into TrueForge's settings.
 
-**AWS quota check (do this first):** Service Quotas → EC2 → *Running On-Demand G and VT instances* in **ap-south-1** must be **≥ 8 vCPUs** (2 × g5.xlarge at 4 vCPUs each).
+**AWS quota check (do this first):** Service Quotas → EC2 → *Running On-Demand G and VT instances* in **ap-south-1** must be **≥ 8 vCPUs** (2 × g6.xlarge at 4 vCPUs each).
 
 ## Deploy on AWS (step by step)
 
 Prerequisites on the laptop: AWS CLI v2 + [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html), Python 3.10+.
 
 ```bash
-# 1. Launch 2 x g5.xlarge (prod, shadow) + 1 x t3.large (control) in ap-south-1
+# 1. Launch 2 x g6.xlarge (prod, shadow) + 1 x t3.large (control) in ap-south-1
 AWS_REGION=ap-south-1 ./infra/aws/launch.sh
 
 # 2. Secrets -> SSM Parameter Store (tokens are generated; HF/GitHub/Prometheus optional)
@@ -110,7 +110,7 @@ The numbers in `mcp_server/policy.yaml` and `workload/scenarios/*.json` are star
    - Too weak: raise `rps` or `long_share` in `long_context_shift.json`.
    - Too strong (everything times out): lower them.
 3. **Prove a fix by hand** before trusting the agent. `deploy_shadow` + `run_load_test`, e.g. `{"max_num_seqs": 16, "enable_prefix_caching": true}`, must pass all SLOs on the captured incident workload.
-4. **Check the tempting wrong fix** (raise `max_num_batched_tokens`) and `kv_cache_dtype: fp8` on A10G. FP8 support depends on the vLLM version, and a failed start is a valid, informative result.
+4. **Check the tempting wrong fix** (raise `max_num_batched_tokens`) and `kv_cache_dtype: fp8` (L4 is Ada-generation, so FP8 KV cache is supported; still quality-gate it), and a failed start is a valid, informative result.
 5. Write the final thresholds into `policy.yaml` from real measurements. Pin `VLLM_IMAGE` to the tag that worked.
 
 ## Running the demo
@@ -160,7 +160,7 @@ To test against a local TrueForge, start it with `OUTBOUND_URL_ALLOWED_HOSTS='["
 - **Still to verify on AWS:**
   - vLLM flags on the pinned image
   - Real KV-cache exhaustion under `long_context_shift` (calibration)
-  - FP8 KV on A10G
+  - FP8 KV cache quality on L4
   - TrueForge Code Mode reaching the MCP server from Daytona
   - The approval pause with the OpenAI model
 

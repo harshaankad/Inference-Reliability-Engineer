@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GPU node setup (AWS Deep Learning Base AMI, Ubuntu 22.04, A10G). Run as root from /opt/firefighter.
+# GPU node setup (AWS Deep Learning Base AMI, Ubuntu 22.04, NVIDIA L4 / g6). Run as root from /opt/firefighter.
 #   bash infra/node/setup_gpu.sh prod|shadow <region>
 # Installs the controller (+ loadgen on prod), pre-pulls vLLM and the model weights, and deploys the
 # initial "legal but wrong" production config.

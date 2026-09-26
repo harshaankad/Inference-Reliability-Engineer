@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the fleet in the organizer AWS account: 2 x g5.xlarge (A10G, prod + shadow) and
+# Launch the fleet in the organizer AWS account: 2 x g6.xlarge (NVIDIA L4, prod + shadow) and
 # 1 x t3.large control node (TrueForge, MCP server, Prometheus), in ap-south-1 (Mumbai).
 # Idempotent: re-running reuses the security group, IAM role and any running instances.
 #
@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 REGION=${AWS_REGION:-ap-south-1}
-GPU_TYPE=${GPU_INSTANCE_TYPE:-g5.xlarge}
+GPU_TYPE=${GPU_INSTANCE_TYPE:-g6.xlarge}
 CONTROL_TYPE=${CONTROL_INSTANCE_TYPE:-t3.large}
 TAG=inference-firefighter
 ROLE=$TAG-node
@@ -67,13 +67,19 @@ launch() {  # name type ami disk_gb
     --query 'Instances[0].InstanceId' --output text
 }
 
-PROD_ID=$(launch prod "$GPU_TYPE" "$GPU_AMI" 200)
-SHADOW_ID=$(launch shadow "$GPU_TYPE" "$GPU_AMI" 200)
+# Control first: it needs no GPU quota. SKIP_GPU=1 launches only the control node (e.g. while a
+# GPU quota increase is pending); re-run without it later to add the GPU nodes.
 CONTROL_ID=$(launch control "$CONTROL_TYPE" "$CONTROL_AMI" 40)
-echo "instances: prod $PROD_ID shadow $SHADOW_ID control $CONTROL_ID; waiting for running"
-aws ec2 wait instance-running --instance-ids "$PROD_ID" "$SHADOW_ID" "$CONTROL_ID"
+PROD_ID="" SHADOW_ID=""
+if [ "${SKIP_GPU:-0}" != "1" ]; then
+  PROD_ID=$(launch prod "$GPU_TYPE" "$GPU_AMI" 200)
+  SHADOW_ID=$(launch shadow "$GPU_TYPE" "$GPU_AMI" 200)
+fi
+echo "instances: control $CONTROL_ID prod ${PROD_ID:-skipped} shadow ${SHADOW_ID:-skipped}; waiting for running"
+# shellcheck disable=SC2086
+aws ec2 wait instance-running --instance-ids $CONTROL_ID $PROD_ID $SHADOW_ID
 
-ip() { aws ec2 describe-instances --instance-ids "$1" --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text; }
+ip() { [ -n "$1" ] || return 0; aws ec2 describe-instances --instance-ids "$1" --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text; }
 cat > instances.env <<EOF
 REGION=$REGION
 PROD_ID=$PROD_ID

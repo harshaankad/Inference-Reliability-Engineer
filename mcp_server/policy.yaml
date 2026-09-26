@@ -1,5 +1,5 @@
 # SLOs and guardrails the agent must satisfy. Visible to the agent via get_policy().
-# The numbers below are STARTING POINTS: calibrate them from real measurements on the g5.xlarge
+# The numbers below are STARTING POINTS: calibrate them from real measurements on the g6.xlarge (L4)
 # (README -> Calibration). Healthy traffic should pass comfortably; the long-context shift should fail.
 
 slos:

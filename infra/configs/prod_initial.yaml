@@ -1,7 +1,7 @@
 # The production config as shipped: every value is legal and individually reasonable, and it
 # passed review. It serves short chat traffic well. It is wrong for long-context traffic:
 #  - max_num_seqs 256 admits far more concurrent sequences than the KV cache can hold when
-#    prompts are 5-11k tokens (Qwen2.5-7B on a 24 GB A10G leaves only tens of thousands of tokens
+#    prompts are 5-11k tokens (Qwen2.5-7B on a 24 GB L4 leaves only tens of thousands of tokens
 #    of KV cache), so vLLM preempts and recomputes, and the queue grows.
 #  - prefix caching was turned off "for deterministic benchmarking", so every long request
 #    re-prefills the same ~1.6k-token shared system prompt.

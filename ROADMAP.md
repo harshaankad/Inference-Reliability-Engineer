@@ -28,7 +28,7 @@
 | Topic | v2 plan | As built | Why |
 |---|---|---|---|
 | Scope | 7+ scenarios, scale-out, admission control, nginx, Grafana | **One flagship incident** done well, plus `surge` and `burst` traffic scenarios for classification | A one-day build; scope discipline beats breadth |
-| GPUs | L4 (`g6`) or a 4-GPU box | **2 × `g5.xlarge` (A10G, 24 GB)** in ap-south-1: prod + shadow | What's available in Mumbai; only 8 vCPUs of quota needed |
+| GPUs | L4 (`g6`) or a 4-GPU box | **2 × `g6.xlarge` (NVIDIA L4, 24 GB)** in ap-south-1: prod + shadow | Available in Mumbai (ap-south-1a/b); FP8 KV cache supported (Ada); only 8 vCPUs of quota needed |
 | Served model | Qwen2.5-3B | **Qwen2.5-7B-Instruct** | ~15 GB of weights leaves only tens of thousands of tokens of KV cache on 24 GB, so long prompts cause **real** KV exhaustion |
 | Incident | Bad config commit | **Legal-but-wrong config + traffic shift to long prompts; no config change** | This is the real shape of inference incidents: there's no error message |
 | Root-cause mechanism | "`max_model_len` reserves memory" (from the pasted doc) | **Over-admission (`max_num_seqs: 256`) → KV exhaustion → preemption/recompute → queueing**, plus **prefix caching off** despite a shared system prompt | vLLM allocates KV blocks lazily (PagedAttention), so `max_model_len` does not reserve memory per sequence |
@@ -48,7 +48,7 @@
 - **Physics:** 7B weights (~15 GB) + KV cache must fit in 0.90 × 24 GB, so only ~10 long requests fit in the cache at once. `max_num_seqs: 256` admits far more, vLLM preempts and recomputes them, the queue grows and p95 TTFT explodes. Prefix caching is off, so the shared system prompt is re-prefilled every time.
 - **Signals the agent should find (in code, in the sandbox):** same rps; prompt length ↑; TTFT bad **only on long prompts**; KV cache pinned; preemptions up; **no config change** in history.
 - **Tempting wrong fix:** raise `max_num_batched_tokens`. Expected to admit more prefill into a full cache; **must be confirmed on the real GPU during calibration**.
-- **Expected fix:** lower `max_num_seqs` (e.g. 16–32) + `enable_prefix_caching: true`. Optionally `kv_cache_dtype: fp8`, which is quality-gated and may not start on A10G, and a failed start is a valid result.
+- **Expected fix:** lower `max_num_seqs` (e.g. 16–32) + `enable_prefix_caching: true`. Optionally `kv_cache_dtype: fp8`, which is supported on the L4 and must pass the quality gate.
 
 ---
 
@@ -116,11 +116,11 @@
 - [ ] `ops.sh register-agent openai/<model-id>`, then `ops.sh smoke`.
 - **Decision point:** if no GPU capacity within ~1 hour, escalate to the organizers. Never fall back to synthetic metrics.
 
-### Phase B: Calibration on the real A10G
+### Phase B: Calibration on the real L4
 - [ ] ~10 min of `healthy` traffic: all SLOs pass with margin.
 - [ ] `long_context_shift`: p95 TTFT ≥ 3–5× baseline, KV ≈ 1.0, preemptions rising within 2–3 minutes. Tune `rps` / `long_share` in the scenario file.
 - [ ] Record the real KV capacity from `get_logs(grep="KV cache")`.
-- [ ] By hand (tools only, no agent): prove the fix passes; confirm the tempting wrong fix (`max_num_batched_tokens` ↑) does **not**; try `kv_cache_dtype: fp8` on A10G and record the result.
+- [ ] By hand (tools only, no agent): prove the fix passes; confirm the tempting wrong fix (`max_num_batched_tokens` ↑) does **not**; try `kv_cache_dtype: fp8` on the L4 and record its quality-eval accuracy.
 - [ ] Write the final SLO thresholds into `mcp_server/policy.yaml`; pin `VLLM_IMAGE`; commit the calibration numbers to the README.
 
 ### Phase C: Agent behavior
@@ -150,7 +150,7 @@
 |---|---|---|
 | 0:00–0:15 | Prometheus / SLO status: p95 up, goodput down | "Production inference on AWS just degraded. No errors, no deploys, config unchanged." |
 | 0:15–0:45 | Agent triage + a Code Mode script in Daytona: TTFT by prompt-length bucket, KV pinned, preemptions, no config change | "It measures instead of guessing. Every number comes from code it wrote, running in a sandbox." |
-| 0:45–1:05 | Reproduce on the shadow A10G with captured production traffic | "It replays real production traffic on a second GPU and reproduces the failure." |
+| 0:45–1:05 | Reproduce on the shadow L4 with captured production traffic | "It replays real production traffic on a second GPU and reproduces the failure." |
 | 1:05–1:45 | Hypothesis → experiment → **REJECTED** (the wrong fix makes it worse) → re-diagnose → winning config | "Its first idea made things worse, and it rejected it on the numbers. Then it found the real mechanism." |
 | 1:45–2:15 | Evidence card, plan with blast radius, **approval card** (Deny with a reason → adapt → Allow) | "Only now does it ask to restart production, with the diff, the evidence and the blast radius." |
 | 2:15–2:45 | Prod restarts, `get_slo_status` shows recovery, final report | "Approved, applied, verified. Real, measured, different numbers." |
@@ -160,17 +160,17 @@
 
 | Risk | Mitigation |
 |---|---|
-| No g5 capacity/quota in ap-south-1 | Check the quota first; escalate by hour 1; try another AZ (`launch.sh` picks one that offers g5) |
+| No g6 capacity/quota in ap-south-1 | Check the quota first; escalate by hour 1; try another AZ (`launch.sh` picks one that offers g6) |
 | vLLM image/driver mismatch on DLAMI | Pin an older `VLLM_IMAGE` tag |
 | Incident not dramatic enough | Tune the scenario rps/long_share; longer prompts |
 | The wrong fix doesn't get worse on real hardware | Fine: the demo shows whichever hypothesis the numbers reject. Never stage it. |
 | Code Mode bridge doesn't reach the MCP server | Direct tool calls + offloaded results analyzed in the sandbox |
-| FP8 KV unsupported on A10G | The fix works without it; a failed start is shown as a rejected experiment |
+| FP8 KV hurts quality on the golden set | The fix works without it; a failed start is shown as a rejected experiment |
 | OpenAI rate limits | Cap parallel subagents; the tools return compact summaries |
 | Secrets on screen | Keys only in TrueForge Settings / SSM; check the screen before recording |
 
 ## 8. Q&A prep
-- **"Is the incident fake?"** Real vLLM on real A10Gs; the degradation is real KV-cache exhaustion and preemption, visible in vLLM's own Prometheus metrics and logs.
+- **"Is the incident fake?"** Real vLLM on real L4 GPUs; the degradation is real KV-cache exhaustion and preemption, visible in vLLM's own Prometheus metrics and logs.
 - **"Is the agent scripted?"** The tools return data, not answers. The traffic scenario name is never exposed. Every decision is in the TrueForge Sessions timeline, including rejected hypotheses.
 - **"What stops it breaking prod?"**
   1. The TrueForge approval gate.

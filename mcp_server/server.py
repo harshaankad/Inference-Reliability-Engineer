@@ -42,7 +42,7 @@ PROD = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_h
 mcp = MCPServer(
     name="inference-ops",
     instructions=(
-        "Tools to diagnose and remediate a vLLM inference service on AWS (Qwen2.5-7B-Instruct on an A10G). "
+        "Tools to diagnose and remediate a vLLM inference service on AWS (Qwen2.5-7B-Instruct on an NVIDIA L4). "
         "Observe tools read production. Shadow tools experiment on a separate GPU. "
         "apply_production_config and rollback_production restart the live server and need human approval. "
         "Time arguments accept 'now', relative offsets like '-15m', '-2h', '-90s', or ISO-8601."

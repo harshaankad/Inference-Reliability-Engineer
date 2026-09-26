@@ -31,6 +31,8 @@ run() {  # instance-id setup-command
     --query Command.CommandId --output text
 }
 
+PROD_IP=${PROD_IP:-} SHADOW_IP=${SHADOW_IP:-}
+if [[ -z "$PROD_ID" && $ONLY != control ]]; then echo "GPU nodes not launched: deploying control only"; ONLY=control; fi
 if [[ $ONLY == all || $ONLY == prod ]]; then echo "prod: $(run "$PROD_ID" "bash infra/node/setup_gpu.sh prod $REGION")"; fi
 if [[ $ONLY == all || $ONLY == shadow ]]; then echo "shadow: $(run "$SHADOW_ID" "bash infra/node/setup_gpu.sh shadow $REGION")"; fi
 if [[ $ONLY == all || $ONLY == control ]]; then
