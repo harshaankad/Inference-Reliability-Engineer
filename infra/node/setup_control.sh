@@ -101,6 +101,10 @@ SQLITE_PATH=$APP/state/trueforge.sqlite
 PUBLIC_BASE_URL=http://localhost:8790
 HOST=127.0.0.1
 OUTBOUND_URL_ALLOWED_HOSTS='["$CONTROL_IP"]'
+# An incident run (several shadow deploys + load tests) takes 15-30 min and single tool calls can
+# take several minutes; the defaults (600 s per turn, 4 min per MCP call) cut runs short.
+SERVER_EXECUTION_TIMEOUT_SECONDS=3600
+MCP_REQUEST_TIMEOUT_MS=1200000
 HOME=/root
 EOF
 
@@ -123,7 +127,7 @@ EOF
 systemctl daemon-reload
 systemctl enable ff-mcp ff-trueforge
 systemctl restart ff-mcp          # pick up a re-rendered control.env on re-runs
-systemctl start ff-trueforge      # not restarted on re-runs: keeps the UI session alive
+systemctl restart ff-trueforge    # picks up trueforge.env changes; data persists in SQLite
 sleep 20
 curl -s -o /dev/null -w "mcp without token -> %{http_code} (expect 401)\n" -XPOST "http://$CONTROL_IP:8765/mcp" || true
 [ -n "$PROD_IP" ] && curl -sf "http://$PROD_IP:9000/health" && echo " prod controller reachable" || echo "prod controller not up yet (GPU setup may still be running)"

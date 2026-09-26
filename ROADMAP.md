@@ -100,7 +100,9 @@
 2. **TrueForge rejects `reasoning_effort`** for models that don't support it, so it's opt-in via `AGENT_REASONING_EFFORT`.
 3. **TrueForge local mode can bind to IPv6 `::1` only.** `HOST=127.0.0.1` pins it to IPv4 so the SSM tunnel works; set in `setup_control.sh`.
 4. **Skills must be imported before an agent can reference them**, so the runbook is inlined by default.
-5. **MCP Python SDK v2 renamed `FastMCP` → `MCPServer`**; tool annotations use snake_case fields but serialize to `readOnlyHint` / `destructiveHint` (verified on the wire).
+5. **TrueForge cancels a turn after 600 s and an MCP call after 4 min by default** (`server-execution-timeout`), which is too short for shadow deploys and load tests. `setup_control.sh` sets `SERVER_EXECUTION_TIMEOUT_SECONDS=3600` and `MCP_REQUEST_TIMEOUT_MS=1200000`.
+6. **Controller load tests and quality evals run as background jobs** that the MCP server polls, so no HTTP request is long-lived (this also works behind proxies with ~100 s limits, e.g. RunPod).
+7. **MCP Python SDK v2 renamed `FastMCP` → `MCPServer`**; tool annotations use snake_case fields but serialize to `readOnlyHint` / `destructiveHint` (verified on the wire).
 
 ---
 
@@ -128,6 +130,7 @@
 - [x] Verify the **Code Mode bridge**: verified; the agent's Daytona script called `call_tool("inference-ops", "get_request_log", …)`.
 - [x] Verify the **approval pause** for `apply_production_config` and **Deny with a reason**: verified; the agent stopped and did not retry.
 - [ ] Deny → **adapt** → re-prove → ask again (needs a real incident run).
+- [x] Full runbook rehearsal on the stand-in engine (`openai/gpt-5-6-sol`): triage → sandbox analysis → classification (traffic-shape shift, no config change) → reproduce on shadow (ACCEPTED) → 4 experiments explicitly REJECTED on measured numbers. The run was cut by the 600 s turn limit, which is now raised.
 - [ ] Run the full incident ≥ 3 times (`chaos reset --clear-evidence …` between runs). Review each run in **Sessions**. Fix failures in the runbook, instructions or tool descriptions, never by hard-coding answers.
 - [ ] Check classification on `burst` (expect "no change") and `surge` (expect "capacity, not config": no scale-out tool exists, so the agent should say so).
 

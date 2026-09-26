@@ -1,6 +1,7 @@
 """HTTP clients for the node controllers (prod and shadow) and optional GitHub audit commits."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 from datetime import datetime, timezone
@@ -63,11 +64,24 @@ class Controller:
         return (await self._req("GET", "/traffic/requests", timeout=60,
                                 params={"start": start, "end": end, "limit": limit}))["records"]
 
+    async def _job(self, path: str, body: dict[str, Any], max_wait_s: float = 1200) -> dict[str, Any]:
+        """Start a background job on the controller and poll it (every request stays short)."""
+        job = await self._req("POST", path, params={"background": "true"}, json=body)
+        deadline = asyncio.get_running_loop().time() + max_wait_s
+        while job["status"] == "running":
+            if asyncio.get_running_loop().time() > deadline:
+                raise ControllerError(f"job {job['id']} still running after {max_wait_s}s")
+            await asyncio.sleep(5)
+            job = await self._req("GET", f"/jobs/{job['id']}")
+        if job["status"] != "done":
+            raise ControllerError(f"job {job['id']} failed: {job.get('error')}")
+        return job["result"]
+
     async def loadtest(self, body: dict[str, Any]) -> dict[str, Any]:
-        return await self._req("POST", f"/slots/{self.slot}/loadtest", timeout=900, json=body)
+        return await self._job(f"/slots/{self.slot}/loadtest", body)
 
     async def quality(self, n: int) -> dict[str, Any]:
-        return await self._req("POST", f"/slots/{self.slot}/quality", timeout=900, json={"n": n})
+        return await self._job(f"/slots/{self.slot}/quality", {"n": n})
 
 
 def prod() -> Controller:

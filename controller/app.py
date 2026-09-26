@@ -6,7 +6,8 @@ bearer token; vLLM itself binds to 127.0.0.1 and is never reachable from outside
 Env:
   CONTROLLER_TOKEN   bearer token (required unless ALLOW_NO_AUTH=1, dev only)
   SLOTS              "name:gpu:port[,name:gpu:port]"  e.g. "prod:0:8100" or "shadow:0:8100"
-  ENGINE_DRIVER      docker (real) | fake (local plumbing tests only)
+  ENGINE_DRIVER      docker (real, vLLM container) | process (real, `vllm serve` child process;
+                     for hosts without Docker, e.g. RunPod) | fake (local plumbing tests only)
   MODEL              HF model id (default Qwen/Qwen2.5-7B-Instruct)
   SERVED_MODEL_NAME  name clients use (default qwen2.5-7b)
   VLLM_IMAGE         docker image (default vllm/vllm-openai:latest; pin after calibration)
@@ -26,6 +27,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -165,34 +167,49 @@ class DockerDriver:
         return out.strip() if code == 0 else "absent"
 
 
-class FakeDriver:
-    """LOCAL PLUMBING TESTS ONLY. Spawns dev/fake_vllm.py instead of a GPU container.
-    Never use for calibration or the demo: its numbers are not real."""
+class ProcessDriver:
+    """Runs the engine as a child process (own process group) instead of a Docker container.
+    Subclasses define the command. Used on hosts without Docker, e.g. GPU containers on RunPod."""
+
+    log_name = "engine.log"
 
     def __init__(self) -> None:
         self.procs: dict[str, subprocess.Popen[bytes]] = {}
 
     def _log(self, slot: str) -> Path:
-        return STATE / slot / "fake_vllm.log"
+        return STATE / slot / self.log_name
+
+    def env(self, slot: str) -> dict[str, str]:
+        return dict(os.environ)
 
     def command(self, slot: str, config: dict[str, Any]) -> list[str]:
-        return [sys.executable, "-m", "dev.fake_vllm", "--port", str(SLOTS[slot]["port"]),
-                "--model", SERVED, "--config", json.dumps(config)]
+        raise NotImplementedError
+
+    def orphan_pattern(self, slot: str) -> str | None:
+        return None  # regex for pkill -f, to clean up engines left over from a controller restart
 
     async def start(self, slot: str, config: dict[str, Any]) -> str:
         self._log(slot).parent.mkdir(parents=True, exist_ok=True)
         log = open(self._log(slot), "ab")
-        self.procs[slot] = subprocess.Popen(self.command(slot, config), stdout=log, stderr=subprocess.STDOUT)
+        self.procs[slot] = subprocess.Popen(self.command(slot, config), stdout=log, stderr=subprocess.STDOUT,
+                                            env=self.env(slot), start_new_session=True)
         return str(self.procs[slot].pid)
 
     async def stop(self, slot: str) -> None:
         p = self.procs.pop(slot, None)
         if p and p.poll() is None:
-            p.terminate()
             try:
-                p.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                p.kill()
+                os.killpg(p.pid, signal.SIGTERM)
+                await asyncio.get_running_loop().run_in_executor(None, lambda: p.wait(timeout=60))
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        pattern = self.orphan_pattern(slot)
+        if pattern:
+            await _run("pkill", "-f", pattern, timeout=15)
+            await asyncio.sleep(2)
 
     async def logs(self, slot: str, tail: int) -> str:
         try:
@@ -202,10 +219,39 @@ class FakeDriver:
 
     async def status(self, slot: str) -> str:
         p = self.procs.get(slot)
-        return "running" if p and p.poll() is None else "absent"
+        if p is None:
+            return "absent"
+        return "running" if p.poll() is None else "exited"
 
 
-driver: DockerDriver | FakeDriver = FakeDriver() if DRIVER == "fake" else DockerDriver()
+class VllmProcessDriver(ProcessDriver):
+    """Real vLLM, launched as `vllm serve` (the binary from the vllm/vllm-openai image or a pip install)."""
+
+    log_name = "vllm.log"
+
+    def env(self, slot: str) -> dict[str, str]:
+        return {**os.environ, "CUDA_VISIBLE_DEVICES": str(SLOTS[slot]["gpu"])}
+
+    def command(self, slot: str, config: dict[str, Any]) -> list[str]:
+        return [os.environ.get("VLLM_BIN", "vllm"), "serve", MODEL, "--served-model-name", SERVED,
+                "--host", "127.0.0.1", "--port", str(SLOTS[slot]["port"]), *vc.render_flags(config)]
+
+    def orphan_pattern(self, slot: str) -> str | None:
+        return f"vllm serve .*--port {SLOTS[slot]['port']}( |$)"
+
+
+class FakeDriver(ProcessDriver):
+    """LOCAL PLUMBING TESTS ONLY. Spawns dev/fake_vllm.py instead of a GPU engine.
+    Never use for calibration or the demo: its numbers are not real."""
+
+    log_name = "fake_vllm.log"
+
+    def command(self, slot: str, config: dict[str, Any]) -> list[str]:
+        return [sys.executable, "-m", "dev.fake_vllm", "--port", str(SLOTS[slot]["port"]),
+                "--model", SERVED, "--config", json.dumps(config)]
+
+
+driver: DockerDriver | ProcessDriver = {"fake": FakeDriver, "process": VllmProcessDriver}.get(DRIVER, DockerDriver)()
 store = Store(STATE / "controller.db")
 deploys: dict[str, dict[str, Any]] = {}
 slot_locks = {s: asyncio.Lock() for s in SLOTS}
@@ -470,13 +516,43 @@ class LoadTestReq(BaseModel):
     drain_timeout_s: float = Field(60, ge=0, le=300)
 
 
-@app.post("/slots/{slot}/loadtest", dependencies=[Depends(auth)])
-async def run_loadtest(slot: str, req: LoadTestReq) -> dict[str, Any]:
+jobs: dict[str, dict[str, Any]] = {}
+
+
+def _start_job(kind: str, slot: str, coro: Any) -> dict[str, Any]:
+    """Run a long task in the background; clients poll GET /jobs/{id}. Keeps every HTTP request short,
+    which matters behind proxies with ~100 s timeouts (e.g. RunPod)."""
+    job = {"id": uuid.uuid4().hex[:10], "kind": kind, "slot": slot, "status": "running", "started_at": time.time()}
+    jobs[job["id"]] = job
+
+    async def runner() -> None:
+        try:
+            job["result"] = await coro
+            job["status"] = "done"
+        except Exception as e:  # surfaced to the poller
+            job.update(status="error", error=f"{type(e).__name__}: {e}")
+        job["finished_at"] = time.time()
+
+    asyncio.create_task(runner())
+    return {k: v for k, v in job.items() if k != "result"}
+
+
+@app.get("/jobs/{job_id}", dependencies=[Depends(auth)])
+async def job_status(job_id: str) -> dict[str, Any]:
+    if job_id not in jobs:
+        raise HTTPException(404, "unknown job")
+    return jobs[job_id]
+
+
+async def _precheck(slot: str) -> None:
     _slot(slot)
     if busy[slot]:
         raise HTTPException(409, f"slot {slot} is busy: {busy[slot]}")
     if not await healthy(slot):
         raise HTTPException(409, f"slot {slot} is not healthy; deploy a config first")
+
+
+async def _loadtest(slot: str, req: LoadTestReq) -> dict[str, Any]:
     act = active_version(slot)
     async with slot_locks[slot]:
         busy[slot] = "load_test"
@@ -492,17 +568,24 @@ async def run_loadtest(slot: str, req: LoadTestReq) -> dict[str, Any]:
     return result
 
 
+@app.post("/slots/{slot}/loadtest", dependencies=[Depends(auth)])
+async def run_loadtest(slot: str, req: LoadTestReq, background: bool = False) -> dict[str, Any]:
+    await _precheck(slot)
+    if background:
+        busy[slot] = "load_test"  # claim the slot now so a second request gets 409 immediately
+        async def go() -> dict[str, Any]:
+            busy[slot] = None
+            return await _loadtest(slot, req)
+        return _start_job("load_test", slot, go())
+    return await _loadtest(slot, req)
+
+
 class QualityReq(BaseModel):
     n: int = Field(40, ge=1, le=200)
     concurrency: int = Field(8, ge=1, le=64)
 
 
-@app.post("/slots/{slot}/quality", dependencies=[Depends(auth)])
-async def quality(slot: str, req: QualityReq) -> dict[str, Any]:
-    """Golden long-context prompts at temperature 0; each has one exact answer (a needle code)."""
-    _slot(slot)
-    if busy[slot]:
-        raise HTTPException(409, f"slot {slot} is busy: {busy[slot]}")
+async def _quality(slot: str, req: QualityReq) -> dict[str, Any]:
     prompts = dataset()["prompts"]
     golden = sorted(k for k, p in prompts.items() if p["kind"] == "golden")[: req.n]
     sem = asyncio.Semaphore(req.concurrency)
@@ -524,6 +607,19 @@ async def quality(slot: str, req: QualityReq) -> dict[str, Any]:
     act = active_version(slot)
     return {"rows": rows, "accuracy": round(sum(r["correct"] for r in rows) / len(rows), 4),
             "config_hash": act and act["config_hash"], "config": act and act["config"]}
+
+
+@app.post("/slots/{slot}/quality", dependencies=[Depends(auth)])
+async def quality(slot: str, req: QualityReq, background: bool = False) -> dict[str, Any]:
+    """Golden long-context prompts at temperature 0; each has one exact answer (a needle code)."""
+    await _precheck(slot)
+    if background:
+        busy[slot] = "load_test"
+        async def go() -> dict[str, Any]:
+            busy[slot] = None
+            return await _quality(slot, req)
+        return _start_job("quality", slot, go())
+    return await _quality(slot, req)
 
 
 # ---- production traffic (prod node only) -------------------------------------------------
