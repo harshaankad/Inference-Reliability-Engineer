@@ -17,8 +17,10 @@
 | Prometheus integration | ✅ Tested with a real Prometheus |
 | AWS: control node (TrueForge + MCP server + Prometheus) | ✅ Running in ap-south-1 |
 | GPU nodes | ✅ **Lightning AI, GCP, 2 Studios × 1 NVIDIA L4** (AWS g6 quota still under review) |
-| Real-GPU calibration of the incident | ✅ Incident reproduced on the L4 (p95 TTFT 2.5 s → 22–29 s, KV cache 99%); SLOs calibrated. ⏳ Fix proof on shadow in progress |
+| Real-GPU calibration of the incident | ✅ Incident reproduced on the L4; fix proven on shadow (`max_num_seqs` 16 + prefix caching: goodput 41% → 100% at 0.6 rps); SLOs and scenarios calibrated |
+| Grafana dashboard | ✅ On the control node (prod + shadow, SLO lines, deploy markers) |
 | Agent on AWS TrueForge (OpenAI + Daytona) | ✅ Wiring verified end to end: Code Mode bridge, shadow tools, approval pause, deny path (stand-in engine) |
+| Full agent run on the real fleet | ⏳ Next |
 | Demo video, final README polish | ⏳ |
 | Repo | ✅ Public: https://github.com/harshaankad/Inference-Reliability-Engineer |
 

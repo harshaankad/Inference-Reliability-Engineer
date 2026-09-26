@@ -125,19 +125,40 @@ HF_TOKEN=hf_xxx ./infra/aws/secrets.sh
 
 Lightning AI, GCP, 1 × NVIDIA L4 per node, Qwen2.5-7B-Instruct, vLLM 0.30. vLLM reports a **KV cache of 51,936 tokens** (about six 8k-token requests at once).
 
-| | Healthy (1 rps, ~5% long prompts) | Incident (1 rps, ~50% long prompts) |
+**What the incident looks like on prod** (1 rps; the demo runs at 0.6 rps, below):
+
+| | Healthy (~5% long prompts) | Incident (~50% long prompts) |
 |---|---|---|
 | p95 TTFT | 2.5 s | 21.9–28.7 s |
 | p95 end-to-end | 20.9 s | 137–163 s |
-| goodput (within SLO) | 99.5% | 4% |
 | output tokens/s | 147 | 7 |
 | KV-cache usage mean / max | 5% / 22% | 81% / 99% |
 | running / waiting for KV capacity | 11 / 0 | 63–95 / up to 15 |
 | preemptions | 0 | 0 (vLLM V1 holds requests back instead; see `waiting_for_kv_capacity`) |
 
-SLOs in `mcp_server/policy.yaml`: p95 TTFT ≤ 4 s, p95 end-to-end ≤ 30 s, error rate ≤ 1%, goodput ≥ 95%. Healthy passes with margin; the incident fails every latency SLO.
+**Proving the fix on the shadow L4** (captured incident traffic, 60 s replays; scored with the final SLOs):
 
-Operator tools: `python -m chaos.measure <minutes>` (what the agent would see), `bash dev/prove_fix.sh '<changes>' …` on the control node (replay captured prod traffic on shadow under candidate configs).
+| Config | Load | p95 TTFT | p95 e2e | Goodput | Verdict |
+|---|---|---|---|---|---|
+| production config (`max_num_seqs` 256, no prefix caching) | 0.6 rps | 14.8 s | 54 s | 41% | ❌ incident |
+| `max_num_batched_tokens` 16384 ("tempting fix") | 1.0 rps | 15.6 s | 68 s | 15% | ❌ |
+| **`max_num_seqs` 16 + `enable_prefix_caching`** | 0.6 rps | **6.8 s** | **28 s** | **100%** | ✅ fix |
+| same + `kv_cache_dtype: fp8` | 0.6 rps | 6.7 s | 30 s | 100% | ✅ (needs the quality gate) |
+| `max_num_seqs` 16 + prefix caching | 1.0 rps | 9.4 s | 47 s | 74% | ❌ capacity limit: needs more GPUs, not config |
+
+**SLOs** (`mcp_server/policy.yaml`): p95 TTFT ≤ 8 s, p95 end-to-end ≤ 40 s, error rate ≤ 1%, goodput ≥ 90%. On an L4 a single 8–10k-token prefill takes ~3 s, so tighter TTFT targets are unrealistic with long-context traffic. **Scenarios**: `healthy` and `long_context_shift` both run at 0.6 rps (same users, different prompts); `surge` is 1.8 rps.
+
+Operator tools: `python -m chaos.measure <minutes>` (what the agent would see), `bash dev/prove_fix.sh '<changes>' …` on the control node (replay captured prod traffic on shadow under candidate configs; `RATE=0.6` to scale).
+
+## Dashboard (Grafana)
+
+`./infra/aws/tunnel.sh 3000` → http://localhost:3000 (read-only, no login). The "Inference Firefighter: vLLM on L4" dashboard shows, for prod and shadow:
+- **What users feel:** p50/p95 TTFT and end-to-end latency, with SLO lines; throughput.
+- **Why:** KV-cache usage, running vs waiting (incl. waiting for KV capacity) vs preemptions, prompt-length distribution, prefix-cache hit rate, GPU utilization.
+- **The live KV config** as vLLM reports it (prefix caching, cache dtype, memory, blocks).
+- **Markers** on every prod/shadow engine restart, so the approved fix and each shadow experiment are visible on the timeline.
+
+The admin password (only needed to edit dashboards) is in `/etc/firefighter/grafana_admin_password` on the control node.
 
 ## Running the demo
 
