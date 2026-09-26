@@ -10,6 +10,9 @@ cd $APP
 set -a; source ~/.ff/node.env; set +a
 export HF_HOME=$FF/hf ENGINE_DRIVER=process VLLM_BIN=$FF/venv/bin/vllm STATE_DIR=$FF/state \
        DATASET_PATH=$FF/dataset.json SLOTS="$ROLE:0:8100" HEALTH_TIMEOUT_S=900 ROLE
+# vLLM JIT-compiles FlashInfer sampling kernels at first start (needs ninja/nvcc on PATH); the built-in
+# sampler avoids that step entirely.
+export PATH=$FF/venv/bin:/usr/local/cuda/bin:$PATH VLLM_USE_FLASHINFER_SAMPLER=0
 mkdir -p $FF/state $FF/logs
 PY=$FF/venv/bin/python
 
@@ -37,6 +40,7 @@ for slot in (os.environ["ROLE"],):
         "Initial prod config for qwen2.5-7b (reviewed)" if slot == "prod" else "shadow baseline")
     deps[slot] = c.post(f"/slots/{slot}/deploy", json={"config": cfg, "author": "platform-team", "message": msg}).json()["id"]
 deadline = time.time() + 1200
+failed = []
 while deps and time.time() < deadline:
     time.sleep(8)
     for slot, dep in list(deps.items()):
@@ -45,7 +49,10 @@ while deps and time.time() < deadline:
         if st["status"] not in ("queued", "stopping", "starting"):
             if st["status"] != "healthy":
                 print(st.get("failure_log_tail") or st.get("error"))
+                failed.append(slot)
             del deps[slot]
+if failed or deps:
+    raise SystemExit(f"ENGINE NOT HEALTHY: {failed or list(deps)}")
 EOF
 
 # Users only start once prod is serving (prod Studio only).
