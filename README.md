@@ -48,6 +48,8 @@ AWS private IPs or controller URLs.
 
 ## A real run, in pictures
 
+**Full gallery with every image and a detailed description: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).**
+
 Recorded on 2026-09-26 on the real fleet: Qwen2.5-7B-Instruct on vLLM 0.30, one NVIDIA L4 per node (Lightning AI, GCP), same request rate throughout (0.6 req/s). All numbers come from Prometheus and the agent's own shadow experiments.
 
 | # | What you see | Image |
@@ -63,6 +65,7 @@ Recorded on 2026-09-26 on the real fleet: Qwen2.5-7B-Instruct on vLLM 0.30, one 
 | 9 | **The whole timeline in Grafana**: baseline → chaos → experiments → approved fix, with the live config showing prefix caching True, memory 0.95, KV concurrency 1.58× → 2.48× | [07](docs/screenshots/07-full-timeline-prod.png), [07b](docs/screenshots/07b-full-timeline-prod-and-shadow.png) |
 | 10 | **One-image summary** (Prometheus): after the fix, p95 TTFT settles around 4–5 s (one brief ~9 s blip), end-to-end around 25–30 s, KV mostly < 30%, and requests waiting for KV stay at zero, under the same long-context traffic that caused the incident | [08](docs/screenshots/08-summary-baseline-chaos-fix.png) |
 | 11 | **TrueForge Sessions**: 3 turns, 37 min, 63 tool calls, 0 errors, with the approval (human-in-the-loop) step on the timeline | [09](docs/screenshots/09-trueforge-session-timeline.png) |
+| 12 | **Grafana live view, last hour**: the tail of the 1.0 req/s calibration overload (how we found the L4's capacity limit) followed by the demo incident and recovery | [10](docs/screenshots/10-grafana-live-last-hour.png) |
 
 ![Summary: baseline, chaos, agent fix](docs/screenshots/08-summary-baseline-chaos-fix.png)
 
