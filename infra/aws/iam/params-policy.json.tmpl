@@ -1,0 +1,8 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "ReadFirefighterSecrets", "Effect": "Allow",
+     "Action": ["ssm:GetParameter", "ssm:GetParameters"],
+     "Resource": "arn:aws:ssm:__REGION__:__ACCOUNT__:parameter/firefighter/*"}
+  ]
+}

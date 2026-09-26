@@ -1,0 +1,30 @@
+# SLOs and guardrails the agent must satisfy. Visible to the agent via get_policy().
+# The numbers below are STARTING POINTS: calibrate them from real measurements on the g5.xlarge
+# (README -> Calibration). Healthy traffic should pass comfortably; the long-context shift should fail.
+
+slos:
+  p95_ttft_ms:   {max: 2000}   # time to first token, all requests
+  p95_e2e_ms:    {max: 6000}   # end-to-end latency, all requests
+  error_rate:    {max: 0.01}   # errors + timeouts + requests cancelled after drain
+  goodput_ratio: {min: 0.95}   # share of offered requests completed within the TTFT and e2e limits
+
+quality:
+  # Golden long-context prompts with exact answers (needle codes). Any change to KV-cache
+  # precision must be quality-checked before it can reach production.
+  min_accuracy: 0.95
+  max_drop_vs_baseline: 0.025
+
+evidence:
+  # apply_production_config refuses unless a shadow load test of the exact candidate config
+  # passed every SLO on production traffic captured recently, at >= real rate.
+  max_age_minutes: 90
+  min_duration_s: 45
+  min_rate_multiplier: 1.0
+
+analysis:
+  long_prompt_threshold_tokens: 2000
+
+constraints:
+  - The served model (Qwen/Qwen2.5-7B-Instruct) is fixed; only serving knobs may change.
+  - Production changes restart the live vLLM process and require human approval.
+  - Experiments run only on the shadow GPU, never against production.

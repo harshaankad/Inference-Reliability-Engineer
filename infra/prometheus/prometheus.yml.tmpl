@@ -1,0 +1,26 @@
+# Scrape config for the Firefighter fleet. Render with infra/node/setup_control.sh (or by hand):
+#   __PROD_IP__ / __SHADOW_IP__  private IPs of the GPU nodes
+#   /etc/prometheus/controller_token  file containing CONTROLLER_TOKEN (chmod 600)
+# If you already run Prometheus, just add these jobs to it. Job names matter: the MCP server
+# queries job="vllm-prod" (override with PROMETHEUS_JOB_PROD).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: vllm-prod
+    metrics_path: /slots/prod/metrics
+    authorization: {type: Bearer, credentials_file: /etc/prometheus/controller_token}
+    static_configs: [{targets: ["__PROD_IP__:9000"], labels: {role: prod}}]
+
+  - job_name: vllm-shadow
+    metrics_path: /slots/shadow/metrics
+    authorization: {type: Bearer, credentials_file: /etc/prometheus/controller_token}
+    static_configs: [{targets: ["__SHADOW_IP__:9000"], labels: {role: shadow}}]
+
+  - job_name: gpu
+    metrics_path: /gpu/metrics
+    authorization: {type: Bearer, credentials_file: /etc/prometheus/controller_token}
+    static_configs:
+      - {targets: ["__PROD_IP__:9000"], labels: {role: prod}}
+      - {targets: ["__SHADOW_IP__:9000"], labels: {role: shadow}}

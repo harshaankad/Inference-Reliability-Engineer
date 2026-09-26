@@ -1,0 +1,823 @@
+INFERENCE AGENT IDEAS FOR THE TRUEFOUNDRY × POLARIS HACKATHON
+
+============================================================
+OVERVIEW
+============================================================
+
+There are two closely related ideas:
+
+1. Inference Firefighter
+2. Inference Release Certifier
+
+Both use largely the same underlying inference-engineering tools and parameters. The main difference is the problem they are solving.
+
+Inference Firefighter:
+    "Something is broken in production. Find the cause and fix it."
+
+Inference Release Certifier:
+    "Something new is being proposed for production. Prove that it is safe."
+
+A possible combined version is:
+
+Inference Reliability Engineer:
+    "Production inference degraded after a model/configuration
+     change. Find the cause and prove the safest remediation."
+
+
+============================================================
+1. INFERENCE FIREFIGHTER
+============================================================
+
+WHAT IS IT?
+
+Inference Firefighter is an AI inference operations engineer.
+
+It does not simply answer:
+
+    "Why is latency bad?"
+
+Instead, it is given a real production problem:
+
+    "Production inference is degraded. Investigate it,
+     reproduce it, find the cause, experimentally find
+     a fix, and prepare the remediation."
+
+The important idea is that the agent ACTS.
+
+It investigates the system, runs experiments in a safe sandbox,
+compares results, finds a valid fix, and then asks for human
+approval before changing production.
+
+
+------------------------------------------------------------
+THE SCENARIO
+------------------------------------------------------------
+
+A realistic inference service can look like:
+
+    Client traffic
+          |
+          v
+    vLLM / serving server
+          |
+          v
+        Model
+          |
+          v
+         GPU
+
+Around this system there is monitoring:
+
+    - Prometheus metrics
+    - Logs
+    - Request traces
+    - GPU metrics
+    - Deployment configuration
+
+
+------------------------------------------------------------
+THE INCIDENT
+------------------------------------------------------------
+
+We deliberately create an inference problem.
+
+For example:
+
+    p95 latency:
+        300 ms  ->  1.5 seconds
+
+The system is now much slower.
+
+
+------------------------------------------------------------
+TOOLS GIVEN TO THE AGENT
+------------------------------------------------------------
+
+Investigation tools:
+
+    get_metrics()
+    get_logs()
+    get_deployment_config()
+    get_recent_changes()
+
+Experimentation tools:
+
+    run_reproduction()
+    run_benchmark(config)
+    modify_candidate_config()
+    compare_results()
+
+Production action:
+
+    apply_production_config()
+
+The last action requires human approval.
+
+
+------------------------------------------------------------
+WHAT THE AGENT DOES
+------------------------------------------------------------
+
+STEP 1: INVESTIGATE
+
+The agent checks the system.
+
+Example:
+
+    p95 latency:       1.53 sec
+    GPU utilization:  96%
+    KV cache:         94%
+    queue depth:      38
+
+The agent notices that the degradation correlates with
+long-context traffic.
+
+
+STEP 2: FORM A HYPOTHESIS
+
+The agent may hypothesize:
+
+    "KV-cache pressure caused by long-context traffic
+     may be contributing to the latency problem."
+
+
+STEP 3: REPRODUCE THE PROBLEM
+
+The agent does NOT immediately change production.
+
+It takes the relevant workload and reproduces the problem
+inside a sandbox.
+
+The sandbox is an isolated environment where the agent can
+safely run code, change configurations, and benchmark the
+system without affecting real production.
+
+
+STEP 4: RUN EXPERIMENTS
+
+Example:
+
+    Baseline
+        p95 = 1530 ms
+
+    Config A: batching change
+        p95 = 1120 ms
+
+    Config B: KV-cache configuration
+        p95 = 740 ms
+
+    Config C: aggressive optimization
+        p95 = 620 ms
+        quality regression = unacceptable
+
+The agent rejects Config C because the quality loss is too high.
+
+
+STEP 5: COMBINE AND VALIDATE
+
+The agent may combine useful changes and run another experiment.
+
+Eventually it might find:
+
+    Candidate configuration
+
+    p95 latency:     690 ms
+    error rate:      unchanged
+    quality:         within tolerance
+    GPU memory:      78%
+
+
+STEP 6: PROPOSE THE REMEDIATION
+
+The agent concludes:
+
+    "I reproduced the incident and validated a remediation.
+     The production configuration can be changed to X."
+
+
+STEP 7: HUMAN APPROVAL
+
+The agent reaches a production-changing action.
+
+TrueForge pauses the agent and shows the human something like:
+
+    ABOUT TO CHANGE PRODUCTION
+
+    vLLM:
+        max_num_batched_tokens
+        2048 -> 4096
+
+    Expected:
+        p95 1530 ms -> approximately 690 ms
+
+    Validated on:
+        20,000 replayed requests
+
+        [ APPROVE ]
+
+
+Only after approval is the production configuration changed.
+
+
+============================================================
+2. INFERENCE RELEASE CERTIFIER
+============================================================
+
+WHAT IS IT?
+
+The Release Certifier solves a different problem.
+
+The Firefighter asks:
+
+    "Something is broken. Can you fix it?"
+
+The Certifier asks:
+
+    "I have a new inference configuration.
+     Can you prove it is safe to release?"
+
+
+------------------------------------------------------------
+THE SCENARIO
+------------------------------------------------------------
+
+Current production:
+
+    Model A
+    vLLM config A
+    GPU config A
+
+Candidate release:
+
+    Model B
+    vLLM config B
+    GPU config B
+
+The agent receives:
+
+    "Certify candidate B for production."
+
+
+------------------------------------------------------------
+TOOLS GIVEN TO THE AGENT
+------------------------------------------------------------
+
+The agent can access:
+
+    - Model registry
+    - Current production configuration
+    - Candidate artifacts
+    - Evaluation dataset
+    - Traffic replay
+    - Benchmark runner
+    - Serving endpoint
+    - GPU metrics
+    - Cost calculator
+
+
+------------------------------------------------------------
+PRODUCTION REQUIREMENTS
+------------------------------------------------------------
+
+The candidate must satisfy requirements such as:
+
+    Quality >= 98% of baseline
+    p95 < 500 ms
+    Error rate < 0.1%
+    Memory < 80%
+    Cost per request < target
+
+
+------------------------------------------------------------
+WHAT THE AGENT DOES
+------------------------------------------------------------
+
+STEP 1: DEPLOY CANDIDATE IN A SAFE ENVIRONMENT
+
+The candidate is deployed for testing rather than immediately
+replacing production.
+
+
+STEP 2: TEST QUALITY
+
+The agent evaluates whether the candidate maintains acceptable
+model quality.
+
+
+STEP 3: TEST LATENCY
+
+The agent runs latency benchmarks.
+
+
+STEP 4: TEST REALISTIC TRAFFIC
+
+The agent replays representative traffic instead of relying
+only on simplistic synthetic tests.
+
+
+STEP 5: CHECK MEMORY AND ERRORS
+
+The agent checks GPU memory usage and error rate.
+
+
+------------------------------------------------------------
+EXAMPLE FIRST RESULT
+------------------------------------------------------------
+
+Suppose:
+
+    Quality:       99.1%   PASS
+    p95 latency:  720 ms   FAIL
+    Memory:        91%      FAIL
+
+The candidate fails.
+
+
+------------------------------------------------------------
+THE AGENT CAN INVESTIGATE AND OPTIMIZE
+------------------------------------------------------------
+
+Instead of simply saying "FAIL", the agent can experiment with
+different inference configurations.
+
+For example:
+
+    - FP8 / other quantization settings
+    - Different batch sizes
+    - KV-cache configuration
+    - Different GPU
+    - Different serving configuration
+
+
+Eventually it might find:
+
+    Candidate #7
+
+    Quality:       98.9%   PASS
+    p95 latency:   431 ms   PASS
+    Memory:        74%      PASS
+    Error rate:    0.06%    PASS
+    Cost:          -28%     PASS
+
+
+The agent can then produce:
+
+    CERTIFIED
+
+
+And finally:
+
+    "Promote candidate #7 to production?"
+
+The production promotion requires human approval.
+
+
+============================================================
+3. THE FUNDAMENTAL DIFFERENCE
+============================================================
+
+INFERENCE FIREFIGHTER
+
+Starting situation:
+
+    Something went wrong.
+
+Question:
+
+    "Why is production broken?"
+
+Goal:
+
+    Find and validate a safe fix.
+
+Workflow:
+
+    Diagnose
+       |
+       v
+    Reproduce
+       |
+       v
+    Experiment
+       |
+       v
+    Fix
+       |
+       v
+    Validate
+       |
+       v
+    APPROVE REMEDIATION
+
+
+INFERENCE RELEASE CERTIFIER
+
+Starting situation:
+
+    Something new is being introduced.
+
+Question:
+
+    "Is this candidate safe to release?"
+
+Goal:
+
+    Prove that the candidate satisfies production requirements.
+
+Workflow:
+
+    Deploy candidate
+       |
+       v
+    Test
+       |
+       v
+    Benchmark
+       |
+       v
+    Optimize
+       |
+       v
+    Compare
+       |
+       v
+    Produce evidence
+       |
+       v
+    APPROVE RELEASE
+
+
+============================================================
+4. THE UNDERLYING INFERENCE-ENGINEERING KNOBS
+============================================================
+
+Both ideas use largely the same technical experimentation
+engine.
+
+The main parameters / optimization dimensions include:
+
+1. BATCHING
+   - Batch size
+   - Batching strategy
+   - Can affect latency, throughput, and memory.
+
+2. KV CACHE
+   - KV-cache configuration
+   - KV-cache utilization
+   - KV-cache reuse
+   - Can strongly affect memory and long-context performance.
+
+3. QUANTIZATION
+   Examples:
+       FP16
+       BF16
+       FP8
+       INT8
+
+   Can reduce memory and potentially improve speed/cost,
+   but may cause quality loss.
+
+4. SPECULATIVE DECODING
+   A smaller/faster model proposes tokens and the main model
+   verifies them.
+
+   Can potentially improve generation speed.
+
+5. MODEL PARALLELISM
+   Splitting model computation across multiple GPUs.
+
+6. GPU CONFIGURATION
+   Trying different GPU types or GPU allocations.
+
+7. SERVING CONFIGURATION
+   Changing settings of the inference serving system.
+
+8. vLLM CONFIGURATION
+   Example:
+       max_num_batched_tokens
+
+   Other serving-engine settings can also be experimented with.
+
+9. DISAGGREGATION
+   Separating different parts of inference across different
+   resources/services.
+
+These knobs are shared by both ideas.
+
+The difference is not primarily the knobs being changed.
+The difference is the workflow and objective.
+
+
+============================================================
+5. WHY THE FIREFIGHTER IS MORE VISIBLY AGENTIC
+============================================================
+
+The Firefighter naturally creates a reasoning loop:
+
+    Observe
+       |
+       v
+    Reason
+       |
+       v
+    Choose a tool
+       |
+       v
+    Execute experiment
+       |
+       v
+    Get result
+       |
+       v
+    Reason again
+       |
+       v
+    Choose another experiment
+       |
+       v
+    ...
+
+For example:
+
+    "I think KV-cache pressure is the problem."
+                     |
+                     v
+                  Experiment
+                     |
+                     v
+    "That did not fix it."
+                     |
+                     v
+                New experiment
+                     |
+                     v
+    "Increasing batching made it worse."
+                     |
+                     v
+                Another experiment
+                     |
+                     v
+    "Found the cause."
+                     |
+                     v
+             Validate remediation
+                     |
+                     v
+              Ask for approval
+
+
+This makes the agent's autonomy easy to see during a hackathon
+demo.
+
+
+============================================================
+6. WHY THE CERTIFIER IS SCIENTIFICALLY CONVINCING
+============================================================
+
+The Certifier has objective pass/fail requirements.
+
+For example:
+
+    Quality          Baseline 100% -> Candidate 98.9%   PASS
+    p95 latency      510 ms -> 431 ms                  PASS
+    Error rate       0.08% -> 0.06%                   PASS
+    GPU memory       82% -> 74%                        PASS
+    Cost / 1M tokens $4.12 -> $2.96                    PASS
+
+It can also use thousands of representative requests.
+
+This creates evidence that a candidate is safe according to
+defined production requirements.
+
+
+============================================================
+7. HOW TRUEFORGE FITS INTO BOTH
+============================================================
+
+The LLM is the reasoning component.
+
+TrueForge is the harness around the agent.
+
+Conceptually:
+
+                 LLM
+              "the brain"
+                  |
+                  v
+             TrueForge
+          "agent harness"
+                  |
+       +----------+----------+
+       |          |          |
+       v          v          v
+   Tools      Sandbox    Approval
+       |          |          |
+       v          v          v
+   Metrics    Experiments  Human
+   Logs       Benchmarks   Decision
+   Config
+   Production
+
+
+The sandbox lets the agent safely execute experiments.
+
+The harness controls the agent loop.
+
+The approval boundary prevents the agent from making
+important production-changing actions without human permission.
+
+
+============================================================
+8. POSSIBLE HYBRID: INFERENCE RELIABILITY ENGINEER
+============================================================
+
+A strong combined concept is:
+
+    INFERENCE RELIABILITY ENGINEER
+
+One agent with two related modes:
+
+MODE 1: CERTIFY
+
+    "Can this candidate safely replace production?"
+
+MODE 2: FIREFIGHT
+
+    "Why is production broken?"
+
+
+However, the project should not become two completely separate
+products.
+
+A narrow combined workflow can be:
+
+    "Production inference degraded after a model/configuration
+     change. Find the cause and prove the safest remediation."
+
+
+The agent then does:
+
+    Production incident
+          |
+          v
+    Inspect telemetry
+          |
+          v
+    Identify candidate change
+          |
+          v
+    Reproduce old/new configurations
+          |
+          v
+    Benchmark
+          |
+          v
+    Experiment with inference settings
+          |
+          v
+    Prove remediation
+          |
+          v
+    Generate exact production diff
+          |
+          v
+    STOP
+    HUMAN APPROVAL
+          |
+          v
+    Real production change
+
+
+============================================================
+9. THE CORE VALUE PROPOSITION
+============================================================
+
+A weak pitch:
+
+    "We built an ML deployment agent."
+
+A stronger pitch:
+
+    "We built an inference engineer that doesn't just tell
+     you what's wrong. It reproduces the production failure,
+     experiments with real inference configurations in a
+     sandbox, proves a remediation, and only then asks
+     permission to touch production."
+
+
+============================================================
+10. SIMPLE COMPARISON
+============================================================
+
+                     FIREFIGHTER       CERTIFIER
+
+Problem              Broken system    New candidate
+
+Main question        How do I fix it? Is it safe?
+
+Starts with           Incident         Proposed release
+
+Investigates          Yes              Yes
+
+Uses metrics          Yes              Yes
+
+Uses logs             Yes              Can
+
+Uses sandbox          Yes              Yes
+
+Runs benchmarks       Yes              Yes
+
+Changes inference
+parameters            Yes              Yes
+
+KV cache              Yes              Yes
+
+Batching              Yes              Yes
+
+Quantization          Yes              Yes
+
+Speculative decoding  Yes              Yes
+
+Parallelism           Yes              Yes
+
+GPU configuration     Yes              Yes
+
+Serving/vLLM config   Yes              Yes
+
+Traffic replay        Yes              Yes
+
+Produces evidence     Yes              Yes
+
+Human approval        Before prod fix  Before prod release
+
+Primary outcome       Remediation      Certification
+
+
+============================================================
+FINAL TAKEAWAY
+============================================================
+
+The two ideas are NOT two completely different technical
+systems.
+
+They share the same inference experimentation engine:
+
+    Batching
+    KV cache
+    Quantization
+    Speculative decoding
+    Model parallelism
+    GPU configuration
+    Serving/vLLM configuration
+    Disaggregation
+    Benchmarking
+    Traffic replay
+    Metrics
+    Logs
+    Traces
+
+What changes is the reason for using that engine.
+
+FIREFIGHTER:
+
+    Production is broken
+          ->
+    Investigate
+          ->
+    Reproduce
+          ->
+    Experiment
+          ->
+    Find fix
+          ->
+    Validate
+          ->
+    Ask permission
+          ->
+    Fix production
+
+
+CERTIFIER:
+
+    New candidate exists
+          ->
+    Test
+          ->
+    Benchmark
+          ->
+    Experiment
+          ->
+    Optimize
+          ->
+    Compare against requirements
+          ->
+    Build evidence
+          ->
+    Ask permission
+          ->
+    Release candidate
+
+The strongest combined direction is therefore an
+INFERENCE RELIABILITY ENGINEER that can safely investigate
+production inference problems and experimentally prove a
+remediation before asking for permission to change production.

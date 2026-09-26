@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+state/
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+.env
+infra/aws/instances.env
+*.tgz
