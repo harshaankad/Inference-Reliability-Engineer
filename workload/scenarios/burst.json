@@ -1,1 +1,1 @@
-{"rps": 1.0, "long_share": 0.05, "burst": {"rps": 5.0, "duration_s": 45}}
+{"rps": 0.6, "long_share": 0.05, "burst": {"rps": 3.0, "duration_s": 45}}

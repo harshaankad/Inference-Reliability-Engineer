@@ -62,6 +62,24 @@ elif [ -z "$PROM_URL" ]; then
   echo "GPU node URLs unknown: skipping Prometheus for now (re-run this script once GPU nodes exist)"
 fi
 
+# ---- Grafana (dashboard for the demo): localhost only, anonymous read-only, reached via SSM tunnel
+if [ -n "$PROM_URL" ]; then
+  GF=/etc/firefighter/grafana
+  mkdir -p $GF
+  rm -rf $GF/provisioning && cp -r infra/grafana/provisioning $GF/provisioning
+  sed -i "s#url: http://127.0.0.1:9090#url: $PROM_URL#" $GF/provisioning/datasources/prometheus.yml
+  [ -s /etc/firefighter/grafana_admin_password ] || (umask 077; openssl rand -hex 12 > /etc/firefighter/grafana_admin_password)
+  docker rm -f grafana 2>/dev/null || true
+  docker run -d --name grafana --restart=always --network host \
+    -e GF_SERVER_HTTP_ADDR=127.0.0.1 -e GF_SERVER_HTTP_PORT=3000 \
+    -e GF_AUTH_ANONYMOUS_ENABLED=true -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
+    -e GF_SECURITY_ADMIN_PASSWORD="$(cat /etc/firefighter/grafana_admin_password)" \
+    -e GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/firefighter.json \
+    -v $GF/provisioning:/etc/grafana/provisioning:ro -v $APP/infra/grafana/dashboards:/var/lib/grafana/dashboards:ro \
+    -v grafana-data:/var/lib/grafana grafana/grafana-oss:latest >/dev/null
+  echo "Grafana on 127.0.0.1:3000 (tunnel: ./infra/aws/tunnel.sh 3000); admin password in /etc/firefighter/grafana_admin_password"
+fi
+
 GITHUB_TOKEN=$(param github_token)
 GITHUB_REPO=$(param github_repo)
 umask 077
