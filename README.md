@@ -6,7 +6,7 @@ Built on [TrueForge](https://trueforge.dev) for the *Agents That Act* hackathon 
 
 ## The incident
 
-A team serves **Qwen2.5-7B-Instruct with vLLM on an NVIDIA L4** (AWS `g6.xlarge`, Mumbai). The config is legal, reviewed, and healthy for weeks of short chat traffic. Then product starts sending long RAG contexts. p95 latency explodes, goodput collapses, preemptions climb. **The config didn't change. The model didn't change. There is no error message.**
+A team serves **Qwen2.5-7B-Instruct with vLLM on an NVIDIA L4** (Lightning AI Studio on GCP). The config is legal, reviewed, and healthy for weeks of short chat traffic. Then product starts sending long RAG contexts. p95 latency explodes, goodput collapses, and the KV cache fills up. **The config didn't change. The model didn't change. There is no error message.**
 
 The physics: 7B weights take ~15 GB of the 24 GB GPU. What's left for the KV cache holds only tens of thousands of tokens. With 5–11k-token prompts and `max_num_seqs: 256`, vLLM admits far more sequences than the cache can hold, preempts and recomputes them, and the queue grows. Prefix caching is off, so every long request re-prefills the same shared system prompt.
 
@@ -30,18 +30,21 @@ The agent has to measure its way to that diagnosis and to a fix: fewer concurren
 ## Architecture
 
 ```
- laptop ──SSM tunnel──▶ CONTROL (t3.large)                          no public ports anywhere
+ laptop ──SSM tunnel──▶ CONTROL (AWS t3.large, ap-south-1; no public ports)
                         ├─ TrueForge :8790 (agent, approvals, UI) ──── Daytona sandbox (agent's code)
                         ├─ inference-ops MCP server :8765 (bearer token)
-                        ├─ Prometheus :9090 (or yours)
+                        ├─ Prometheus :9090
                         └─ chaos tooling (operator only)
-                               │ VPC-only, bearer token
+                               │ HTTPS + bearer token (Lightning Studio port URLs)
             ┌──────────────────┴──────────────────┐
-     PROD g6.xlarge (L4)                  SHADOW g6.xlarge (L4)
-     controller :9000                     controller :9000
-     vLLM (127.0.0.1:8100)                vLLM (127.0.0.1:8100) ← candidate configs
-     loadgen = the users + request log    replay harness + quality eval
+     ff-prod Studio (GCP, 1 x L4)          ff-shadow Studio (GCP, 1 x L4)
+     controller :9000                      controller :9000
+     vLLM 0.30 (127.0.0.1:8100)            vLLM 0.30 (127.0.0.1:8100) ← candidate configs
+     loadgen = the users + request log     replay harness + quality eval
 ```
+The GPU nodes run on **Lightning AI** because the AWS GPU quota was still under review. The same code
+also deploys GPU nodes on AWS (`g6.xlarge`, see "Deploy on AWS" below); the control node accepts either
+AWS private IPs or controller URLs.
 
 ### MCP tools (`inference-ops`)
 | Class | Tools |
@@ -64,6 +67,7 @@ Guardrails live in the server regardless of approval:
 | **AWS credentials** | Organizers | Your laptop's AWS CLI only (`aws configure` or SSO), to run `infra/aws/*.sh`. The instances use an IAM role, with no keys on them. | Yes |
 | **OpenAI API key** | Organizers | TrueForge UI → Settings → Models → OpenAI | Yes |
 | **Daytona API key** | You (daytona.io) | TrueForge UI → Settings → Sandbox providers. The key needs **Sandboxes** access **and Snapshots write**. | Yes |
+| **Lightning AI API key** | You (lightning.ai) | `export LIGHTNING_API_KEY=…` in your terminal only (used by `infra/lightning/studio.py`) | Yes, for Lightning GPU nodes |
 | Hugging Face read token | You | `HF_TOKEN=… ./infra/aws/secrets.sh` (SSM SecureString) | Recommended (the model is ungated; avoids download rate limits) |
 | GitHub fine-grained PAT + repo | You | `GITHUB_TOKEN=… GITHUB_REPO=owner/repo ./infra/aws/secrets.sh` | Optional (commits each approved prod config as an audit trail) |
 | Existing Prometheus URL (+ auth) | You | `PROMETHEUS_URL=… ./infra/aws/secrets.sh`, plus `PROMETHEUS_BEARER_TOKEN` in `/etc/firefighter/control.env` | Optional. If unset, a Prometheus is started on the control node. |
@@ -72,6 +76,22 @@ Guardrails live in the server regardless of approval:
 Keys never go into the repo or the video. The OpenAI and Daytona keys are only ever pasted into TrueForge's settings.
 
 **AWS quota check (do this first):** Service Quotas → EC2 → *Running On-Demand G and VT instances* in **ap-south-1** must be **≥ 8 vCPUs** (2 × g6.xlarge at 4 vCPUs each).
+
+## Deploy: GPU nodes on Lightning AI (current setup)
+
+The control node runs on AWS (steps 1–2 and 4–6 of "Deploy on AWS" below, with `SKIP_GPU=1 ./infra/aws/launch.sh`). The GPU nodes are two Lightning Studios:
+```bash
+export LIGHTNING_API_KEY=...                        # never commit it
+for r in prod shadow; do
+  python -m infra.lightning.studio up $r            # GCP, 1 x L4, exposes :9000, saves the URL to infra/lightning/studio.env
+  python -m infra.lightning.studio push $r          # code + ~/.ff/node.env (tokens read from AWS SSM)
+  python -m infra.lightning.studio setup $r         # vLLM (uv), Qwen2.5-7B weights, dataset, controller, engine (~10 min)
+done
+python -m infra.lightning.studio logs prod setup    # wait for "SETUP COMPLETE (prod)"
+./infra/aws/deploy_code.sh control                  # points the control node + Prometheus at the Studio URLs
+python -m infra.lightning.studio stop prod          # stop GPU billing when done (same for shadow)
+```
+After a Studio restart: `python -m infra.lightning.studio start <role>` brings the controller, engine and traffic back.
 
 ## Deploy on AWS (step by step)
 
@@ -101,17 +121,23 @@ HF_TOKEN=hf_xxx ./infra/aws/secrets.sh
 ./infra/aws/ssm.sh control '/opt/firefighter/infra/node/ops.sh smoke'
 ```
 
-## Calibration (do this on the real GPU before rehearsing)
+## Calibration (measured on the real fleet)
 
-The numbers in `mcp_server/policy.yaml` and `workload/scenarios/*.json` are starting points.
+Lightning AI, GCP, 1 × NVIDIA L4 per node, Qwen2.5-7B-Instruct, vLLM 0.30. vLLM reports a **KV cache of 51,936 tokens** (about six 8k-token requests at once).
 
-1. **Healthy baseline:** leave `healthy` traffic running ~10 minutes. `get_slo_status` should pass every SLO comfortably.
-2. **Incident:** `ops.sh chaos traffic long_context_shift`. Within 2–3 minutes you want p95 TTFT **≥ 3–5× baseline**, KV-cache usage pinned near 1.0, and preemptions climbing. `get_logs(grep="KV cache|preempt")` shows the real KV capacity.
-   - Too weak: raise `rps` or `long_share` in `long_context_shift.json`.
-   - Too strong (everything times out): lower them.
-3. **Prove a fix by hand** before trusting the agent. `deploy_shadow` + `run_load_test`, e.g. `{"max_num_seqs": 16, "enable_prefix_caching": true}`, must pass all SLOs on the captured incident workload.
-4. **Check the tempting wrong fix** (raise `max_num_batched_tokens`) and `kv_cache_dtype: fp8` (L4 is Ada-generation, so FP8 KV cache is supported; still quality-gate it), and a failed start is a valid, informative result.
-5. Write the final thresholds into `policy.yaml` from real measurements. Pin `VLLM_IMAGE` to the tag that worked.
+| | Healthy (1 rps, ~5% long prompts) | Incident (1 rps, ~50% long prompts) |
+|---|---|---|
+| p95 TTFT | 2.5 s | 21.9–28.7 s |
+| p95 end-to-end | 20.9 s | 137–163 s |
+| goodput (within SLO) | 99.5% | 4% |
+| output tokens/s | 147 | 7 |
+| KV-cache usage mean / max | 5% / 22% | 81% / 99% |
+| running / waiting for KV capacity | 11 / 0 | 63–95 / up to 15 |
+| preemptions | 0 | 0 (vLLM V1 holds requests back instead; see `waiting_for_kv_capacity`) |
+
+SLOs in `mcp_server/policy.yaml`: p95 TTFT ≤ 4 s, p95 end-to-end ≤ 30 s, error rate ≤ 1%, goodput ≥ 95%. Healthy passes with margin; the incident fails every latency SLO.
+
+Operator tools: `python -m chaos.measure <minutes>` (what the agent would see), `bash dev/prove_fix.sh '<changes>' …` on the control node (replay captured prod traffic on shadow under candidate configs).
 
 ## Running the demo
 

@@ -15,8 +15,9 @@
 | Code: MCP server, node controller, load generator, replay harness, dataset, chaos tooling | ✅ Built and tested locally |
 | TrueForge integration: connector registration + agent with approval gates | ✅ Tested against a real TrueForge server |
 | Prometheus integration | ✅ Tested with a real Prometheus |
-| AWS: control node (TrueForge + MCP server) | ✅ Running in ap-south-1; GPU nodes ⏳ waiting on the g6 quota (AWS support case) |
-| Real-GPU calibration of the incident | ⏳ Needs AWS |
+| AWS: control node (TrueForge + MCP server + Prometheus) | ✅ Running in ap-south-1 |
+| GPU nodes | ✅ **Lightning AI, GCP, 2 Studios × 1 NVIDIA L4** (AWS g6 quota still under review) |
+| Real-GPU calibration of the incident | ✅ Incident reproduced on the L4 (p95 TTFT 2.5 s → 22–29 s, KV cache 99%); SLOs calibrated. ⏳ Fix proof on shadow in progress |
 | Agent on AWS TrueForge (OpenAI + Daytona) | ✅ Wiring verified end to end: Code Mode bridge, shadow tools, approval pause, deny path (stand-in engine) |
 | Demo video, final README polish | ⏳ |
 | Repo | ✅ Public: https://github.com/harshaankad/Inference-Reliability-Engineer |
@@ -28,7 +29,7 @@
 | Topic | v2 plan | As built | Why |
 |---|---|---|---|
 | Scope | 7+ scenarios, scale-out, admission control, nginx, Grafana | **One flagship incident** done well, plus `surge` and `burst` traffic scenarios for classification | A one-day build; scope discipline beats breadth |
-| GPUs | L4 (`g6`) or a 4-GPU box | **2 × `g6.xlarge` (NVIDIA L4, 24 GB)** in ap-south-1: prod + shadow | Available in Mumbai (ap-south-1a/b); FP8 KV cache supported (Ada); only 8 vCPUs of quota needed |
+| GPUs | L4 (`g6`) or a 4-GPU box | **2 Lightning AI Studios on GCP, 1 × NVIDIA L4 (24 GB) each**: prod + shadow. AWS `g6.xlarge` path kept in the code | AWS GPU quota was 0 and the increase went to manual review; Lightning had L4s immediately |
 | Served model | Qwen2.5-3B | **Qwen2.5-7B-Instruct** | ~15 GB of weights leaves only tens of thousands of tokens of KV cache on 24 GB, so long prompts cause **real** KV exhaustion |
 | Incident | Bad config commit | **Legal-but-wrong config + traffic shift to long prompts; no config change** | This is the real shape of inference incidents: there's no error message |
 | Root-cause mechanism | "`max_model_len` reserves memory" (from the pasted doc) | **Over-admission (`max_num_seqs: 256`) → KV exhaustion → preemption/recompute → queueing**, plus **prefix caching off** despite a shared system prompt | vLLM allocates KV blocks lazily (PagedAttention), so `max_model_len` does not reserve memory per sequence |
@@ -101,8 +102,11 @@
 3. **TrueForge local mode can bind to IPv6 `::1` only.** `HOST=127.0.0.1` pins it to IPv4 so the SSM tunnel works; set in `setup_control.sh`.
 4. **Skills must be imported before an agent can reference them**, so the runbook is inlined by default.
 5. **TrueForge cancels a turn after 600 s and an MCP call after 4 min by default** (`server-execution-timeout`), which is too short for shadow deploys and load tests. `setup_control.sh` sets `SERVER_EXECUTION_TIMEOUT_SECONDS=3600` and `MCP_REQUEST_TIMEOUT_MS=1200000`.
-6. **Controller load tests and quality evals run as background jobs** that the MCP server polls, so no HTTP request is long-lived (this also works behind proxies with ~100 s limits, e.g. RunPod).
-7. **MCP Python SDK v2 renamed `FastMCP` → `MCPServer`**; tool annotations use snake_case fields but serialize to `readOnlyHint` / `destructiveHint` (verified on the wire).
+6. **vLLM 0.30 FlashInfer sampler JIT-compiles kernels at first start and needs `ninja` on PATH.** On the Studios we set `VLLM_USE_FLASHINFER_SAMPLER=0`.
+7. **vLLM 0.30 does not preempt under KV pressure here; it holds requests back.** The signal is `vllm:num_requests_waiting_by_reason{reason="capacity"}`, exposed to the agent as `waiting_for_kv_capacity`.
+8. **Lightning Studio port URLs are public HTTPS** (no Lightning auth); the controller's bearer token is what protects them. `upload_file` paths are relative to the Studio home.
+9. **Controller load tests and quality evals run as background jobs** that the MCP server polls, so no HTTP request is long-lived (this also works behind proxies with ~100 s limits, e.g. RunPod).
+10. **MCP Python SDK v2 renamed `FastMCP` → `MCPServer`**; tool annotations use snake_case fields but serialize to `readOnlyHint` / `destructiveHint` (verified on the wire).
 
 ---
 
