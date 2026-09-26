@@ -32,6 +32,13 @@ run() {  # instance-id setup-command
 }
 
 PROD_IP=${PROD_IP:-} SHADOW_IP=${SHADOW_IP:-}
+# GPU nodes on Lightning AI instead of AWS: use the Studio controller URLs for the control node.
+if [ -f infra/lightning/studio.env ]; then
+  # shellcheck disable=SC1091
+  source infra/lightning/studio.env
+  PROD_IP=${PROD_CONTROLLER_URL:-$PROD_IP} SHADOW_IP=${SHADOW_CONTROLLER_URL:-$SHADOW_IP}
+  echo "GPU nodes: Lightning ($PROD_IP, $SHADOW_IP)"
+fi
 if [[ -z "$PROD_ID" && $ONLY != control ]]; then echo "GPU nodes not launched: deploying control only"; ONLY=control; fi
 if [[ $ONLY == all || $ONLY == prod ]]; then echo "prod: $(run "$PROD_ID" "bash infra/node/setup_gpu.sh prod $REGION")"; fi
 if [[ $ONLY == all || $ONLY == shadow ]]; then echo "shadow: $(run "$SHADOW_ID" "bash infra/node/setup_gpu.sh shadow $REGION")"; fi

@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Control node setup (Ubuntu 22.04, t3.large). Run as root from /opt/firefighter.
-#   bash infra/node/setup_control.sh <region> <prod_ip> <shadow_ip>
+#   bash infra/node/setup_control.sh <region> <prod> <shadow>
+#   <prod>/<shadow>: an AWS private IP (-> http://IP:9000) or a full controller URL
+#   (e.g. a Lightning Studio port URL https://9000-<id>.cloudspaces.litng.ai)
 # Installs: MCP server (systemd ff-mcp), Prometheus (unless /firefighter/prometheus_url points at
 # yours), TrueForge (npx, systemd ff-trueforge, bound to localhost, reached via SSM tunnel).
 set -euxo pipefail
 REGION=$1
-PROD_IP=${2:-}     # may be empty while GPU nodes are not launched yet; re-run setup once they are
-SHADOW_IP=${3:-}
+to_url() { case "$1" in *://*) echo "${1%/}" ;; "") echo "" ;; *) echo "http://$1:9000" ;; esac; }
+PROD_URL=$(to_url "${2:-}")     # may be empty while GPU nodes don't exist yet; re-run setup once they do
+SHADOW_URL=$(to_url "${3:-}")
+scheme_of() { echo "${1%%://*}"; }
+target_of() { local h=${1#*://}; echo "${h%%/*}"; }
 APP=/opt/firefighter
 cd $APP
 # A real (re)deploy always removes the fake-engine wiring-test stack if it is running.
@@ -42,17 +47,19 @@ mkdir -p /etc/firefighter state/mcp /etc/prometheus
 
 # ---- Prometheus (skip if you already run one: set /firefighter/prometheus_url and add the
 # ---- jobs from infra/prometheus/prometheus.yml.tmpl to it)
-if [ -z "$PROM_URL" ] && [ -n "$PROD_IP" ]; then
+if [ -z "$PROM_URL" ] && [ -n "$PROD_URL" ]; then
   umask 077; printf '%s' "$CONTROLLER_TOKEN" > /etc/prometheus/controller_token; umask 022
   chmod 644 /etc/prometheus/controller_token  # prom container runs as nobody; host is single-purpose
-  sed -e "s/__PROD_IP__/$PROD_IP/g; s/__SHADOW_IP__/$SHADOW_IP/g" infra/prometheus/prometheus.yml.tmpl > /etc/prometheus/prometheus.yml
+  sed -e "s#__PROD_SCHEME__#$(scheme_of "$PROD_URL")#g; s#__PROD_TARGET__#$(target_of "$PROD_URL")#g" \
+      -e "s#__SHADOW_SCHEME__#$(scheme_of "$SHADOW_URL")#g; s#__SHADOW_TARGET__#$(target_of "$SHADOW_URL")#g" \
+      infra/prometheus/prometheus.yml.tmpl > /etc/prometheus/prometheus.yml
   docker rm -f prometheus 2>/dev/null || true
   docker run -d --name prometheus --restart=always --network host \
     -v /etc/prometheus:/etc/prometheus -v prometheus-data:/prometheus prom/prometheus:latest \
     --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=3d --web.listen-address=127.0.0.1:9090
   PROM_URL=http://127.0.0.1:9090
 elif [ -z "$PROM_URL" ]; then
-  echo "GPU node IPs unknown: skipping Prometheus for now (re-run this script after launching GPU nodes)"
+  echo "GPU node URLs unknown: skipping Prometheus for now (re-run this script once GPU nodes exist)"
 fi
 
 GITHUB_TOKEN=$(param github_token)
@@ -61,8 +68,8 @@ umask 077
 cat > /etc/firefighter/control.env <<EOF
 CONTROLLER_TOKEN=$CONTROLLER_TOKEN
 MCP_AUTH_TOKEN=$MCP_TOKEN
-PROD_CONTROLLER_URL=http://$PROD_IP:9000
-SHADOW_CONTROLLER_URL=http://$SHADOW_IP:9000
+PROD_CONTROLLER_URL=$PROD_URL
+SHADOW_CONTROLLER_URL=$SHADOW_URL
 PROD_SLOT=prod
 SHADOW_SLOT=shadow
 MCP_STATE_DIR=$APP/state/mcp
@@ -130,7 +137,7 @@ systemctl restart ff-mcp          # pick up a re-rendered control.env on re-runs
 systemctl restart ff-trueforge    # picks up trueforge.env changes; data persists in SQLite
 sleep 20
 curl -s -o /dev/null -w "mcp without token -> %{http_code} (expect 401)\n" -XPOST "http://$CONTROL_IP:8765/mcp" || true
-[ -n "$PROD_IP" ] && curl -sf "http://$PROD_IP:9000/health" && echo " prod controller reachable" || echo "prod controller not up yet (GPU setup may still be running)"
-[ -n "$SHADOW_IP" ] && curl -sf "http://$SHADOW_IP:9000/health" && echo " shadow controller reachable" || echo "shadow controller not up yet"
+[ -n "$PROD_URL" ] && curl -sf "$PROD_URL/health" && echo " prod controller reachable" || echo "prod controller not up yet (GPU setup may still be running)"
+[ -n "$SHADOW_URL" ] && curl -sf "$SHADOW_URL/health" && echo " shadow controller reachable" || echo "shadow controller not up yet"
 for _ in $(seq 1 30); do curl -sf 127.0.0.1:8790/api/v1/agents >/dev/null && break; sleep 5; done
 echo "SETUP COMPLETE (control). TrueForge on localhost:8790 (tunnel: ./infra/aws/tunnel.sh)"

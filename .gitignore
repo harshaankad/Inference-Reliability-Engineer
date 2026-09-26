@@ -11,3 +11,4 @@ data/
 .env
 infra/aws/instances.env
 *.tgz
+infra/lightning/studio.env
