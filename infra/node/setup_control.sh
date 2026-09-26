@@ -5,7 +5,7 @@
 #   (e.g. a Lightning Studio port URL https://9000-<id>.cloudspaces.litng.ai)
 # Installs: MCP server (systemd ff-mcp), Prometheus (unless /firefighter/prometheus_url points at
 # yours), TrueForge (npx, systemd ff-trueforge, bound to localhost, reached via SSM tunnel).
-set -euxo pipefail
+set -euo pipefail  # no xtrace: this script handles secrets
 REGION=$1
 to_url() { case "$1" in *://*) echo "${1%/}" ;; "") echo "" ;; *) echo "http://$1:9000" ;; esac; }
 PROD_URL=$(to_url "${2:-}")     # may be empty while GPU nodes don't exist yet; re-run setup once they do

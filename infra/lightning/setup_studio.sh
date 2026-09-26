@@ -3,7 +3,7 @@
 # users) and ff-shadow (vLLM for experiments). The node controller listens on :9000, which the Studio
 # exposes as a public HTTPS URL; every request needs the bearer token. vLLM binds to 127.0.0.1 only.
 #   bash infra/lightning/setup_studio.sh prod|shadow   (idempotent; needs ~/.ff/node.env from studio.py)
-set -euxo pipefail
+set -euo pipefail  # no xtrace: this script handles secrets
 ROLE=$1
 FF=/teamspace/studios/this_studio/ff
 APP=$FF/app

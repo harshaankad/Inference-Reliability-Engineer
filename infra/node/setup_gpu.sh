@@ -3,7 +3,7 @@
 #   bash infra/node/setup_gpu.sh prod|shadow <region>
 # Installs the controller (+ loadgen on prod), pre-pulls vLLM and the model weights, and deploys the
 # initial "legal but wrong" production config.
-set -euxo pipefail
+set -euo pipefail  # no xtrace: this script handles secrets
 ROLE=$1
 REGION=$2
 APP=/opt/firefighter
